@@ -213,9 +213,15 @@ ES 모듈을 쓰기 때문에 **`index.html` 을 더블클릭하면 열리지 �
 
 ### 명령어로 켜기
 
-```bash
-cd "C:/Users/think/OneDrive/Documents/pjs/schedule-planner" && python -m http.server 5577
+PowerShell 에서:
+
+```powershell
+cd "C:\Users\think\OneDrive\Documents\pjs\schedule-planner"; python -m http.server 5577
 ```
+
+> **주의**: Windows PowerShell 5.1 은 `&&` 를 못 씁니다
+> (`'&&' 토큰은 이 버전에서 올바른 문 구분 기호가 아닙니다` 오류).
+> 명령 두 개를 이어 쓸 때는 `&&` 대신 **`;`** 를 쓰세요.
 
 그 다음 브라우저 **주소창에 직접** <http://localhost:5577> 을 칩니다.
 (`http://` 까지 다 쳐야 합니다. `localhost:5577` 만 치면 검색어로 알아듣는 브라우저가 있습니다.)
