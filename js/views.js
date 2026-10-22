@@ -2,10 +2,13 @@
 
 import {
   esc, safeUrl, todayKey, addDays, pad, dday, daysBetween,
-  longDate, midDate, shortDate, byOrder, sortEvents, TYPE_KEYS, TYPES, typeLabel,
+  longDate, midDate, shortDate, byOrder, sortEvents,
+  typeOf, rgba, lighten, textOn, pct, normHex,
 } from './util.js';
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
+
+export const NEW_TYPE = '__new__';
 
 /* ===================== 작은 조각들 ===================== */
 
@@ -35,10 +38,17 @@ function subjectOptions(data, selected) {
   return `<option value=""${!selected ? ' selected' : ''}>과목 없음</option>${opts.join('')}`;
 }
 
-function typeOptions(selected) {
-  return TYPE_KEYS.map((t) => (
-    `<option value="${t}"${t === selected ? ' selected' : ''}>${esc(TYPES[t].label)}</option>`
-  )).join('');
+function typeOptions(data, selected) {
+  const list = byOrder(data.types);
+  const opts = list.map((t) => (
+    `<option value="${esc(t.id)}"${t.id === selected ? ' selected' : ''}>${esc(t.label)}</option>`
+  ));
+  // 지워진 종류를 쓰고 있던 일정도 값을 잃지 않게
+  if (selected && selected !== NEW_TYPE && !list.some((t) => t.id === selected)) {
+    opts.unshift(`<option value="${esc(selected)}" selected>기타</option>`);
+  }
+  opts.push(`<option value="${NEW_TYPE}"${selected === NEW_TYPE ? ' selected' : ''}>＋ 직접 입력…</option>`);
+  return opts.join('');
 }
 
 function subjectName(data, id) {
@@ -47,10 +57,22 @@ function subjectName(data, id) {
   return s ? s.name : '과목 없음';
 }
 
+function typeBadge(t) {
+  return `<span class="badge" style="--bg:${rgba(t.color, 0.16)};--fg:${t.color};--fg-dark:${lighten(t.color, 0.45)}">${esc(t.label)}</span>`;
+}
+
 function ddayBadge(key, base) {
   const n = daysBetween(base, key);
   const cls = n < 0 ? 'b-late' : (n <= 1 ? 'b-soon' : '');
   return `<span class="badge ${cls}">${esc(dday(key, base))}</span>`;
+}
+
+function progressBar(done, total) {
+  const p = pct(done, total);
+  const full = total > 0 && Number(done) >= Number(total);
+  return `<div class="bar${full ? ' is-full' : ''}" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100" aria-label="진행률 ${p}퍼센트">
+    <span style="width:${p}%"></span>
+  </div>`;
 }
 
 /* ===================== 일정 카드 / 폼 ===================== */
@@ -63,12 +85,17 @@ function eventForm(data, ui, ev, ctx) {
     subject: val(ui, 'subject', ev ? (ev.subject || '') : (ctx.subject || '')),
     note: val(ui, 'note', ev ? (ev.note || '') : ''),
   };
+  const custom = d.type === NEW_TYPE;
   return `<div class="form">
     ${errLine(ui)}
     <div class="f-row">
       <label>날짜<input type="date" data-k="date" value="${esc(d.date)}"></label>
-      <label>종류<select data-k="type">${typeOptions(d.type)}</select></label>
+      <label>종류<select data-k="type">${typeOptions(data, d.type)}</select></label>
     </div>
+    ${custom ? `<div class="f-row sub-row">
+      <label>새 종류 이름<input type="text" data-k="newTypeLabel" value="${esc(val(ui, 'newTypeLabel', ''))}" placeholder="예: 발표, 과제, 학원"></label>
+      <label class="narrow">색<input type="color" data-k="newTypeColor" value="${esc(val(ui, 'newTypeColor', '#2f5bd7'))}"></label>
+    </div>` : ''}
     <div class="f-row">
       <label>제목<input type="text" data-k="title" value="${esc(d.title)}" placeholder="예: 미적분2 심화탐구 수행평가"></label>
     </div>
@@ -95,12 +122,13 @@ function eventItem(data, ui, ev, opts) {
     return confirmRow(`"${ev.title}" 일정을 정말 삭제할까요?`, key);
   }
 
-  const meta = [`<span class="badge b-${esc(ev.type)}">${esc(typeLabel(ev.type))}</span>`];
+  const t = typeOf(data, ev.type);
+  const meta = [typeBadge(t)];
   if (o.showDday) meta.push(ddayBadge(ev.date, ui.today));
   if (o.showDate) meta.push(`<span>${esc(shortDate(ev.date))}</span>`);
   if (o.showSubject && ev.subject) meta.push(`<span>${esc(subjectName(data, ev.subject))}</span>`);
 
-  return `<div class="item t-${esc(ev.type)}${ev.done ? ' is-done' : ''}">
+  return `<div class="item${ev.done ? ' is-done' : ''}" style="border-left-color:${t.color}">
     <button type="button" class="check" data-act="ev-toggle" data-id="${esc(ev.id)}"
       aria-pressed="${ev.done ? 'true' : 'false'}" aria-label="완료 표시">${ev.done ? '✓' : ''}</button>
     <div class="item-main">
@@ -126,12 +154,79 @@ function todoForm(data, ui, todo, ctx) {
   const d = {
     date: val(ui, 'date', todo ? todo.date : (ctx.date || ui.today)),
     title: val(ui, 'title', todo ? todo.title : ''),
+    subject: val(ui, 'subject', todo ? (todo.subject || '') : (ctx.subject || '')),
   };
   return `<div class="form">
     ${errLine(ui)}
     <div class="f-row">
       <label>날짜<input type="date" data-k="date" value="${esc(d.date)}"></label>
       <label>할 일<input type="text" data-k="title" value="${esc(d.title)}" placeholder="예: 기하 학습지 40~50번"></label>
+    </div>
+    ${ctx.lockSubject ? `<input type="hidden" data-k="subject" value="${esc(d.subject)}">` : `<div class="f-row">
+      <label>과목<select data-k="subject">${subjectOptions(data, d.subject)}</select></label>
+    </div>`}
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+    </div>
+  </div>`;
+}
+
+function todoItem(data, ui, t, opts) {
+  const o = opts || {};
+  const key = `todo:${t.id}`;
+  if (ui.form && ui.form.type === 'todo' && ui.form.id === t.id) {
+    return todoForm(data, ui, t, { lockSubject: o.lockSubject });
+  }
+  if (ui.pendingDelete === key) return confirmRow(`"${t.title}" 할 일을 정말 삭제할까요?`, key);
+
+  const late = daysBetween(ui.today, t.date) < 0;
+  const meta = [];
+  if (late) meta.push(`<span class="badge b-late">${esc(shortDate(t.date))} · 밀림</span>`);
+  else if (t.date !== ui.today) meta.push(`<span class="badge">${esc(shortDate(t.date))} · ${esc(dday(t.date, ui.today))}</span>`);
+  else if (o.showToday) meta.push('<span class="badge b-soon">오늘</span>');
+  if (o.showSubject && t.subject) meta.push(`<span>${esc(subjectName(data, t.subject))}</span>`);
+
+  const todoColor = typeOf(data, 'todo').color;
+  return `<div class="item${t.done ? ' is-done' : ''}" style="border-left-color:${todoColor}">
+    <button type="button" class="check" data-act="todo-toggle" data-id="${esc(t.id)}"
+      aria-pressed="${t.done ? 'true' : 'false'}" aria-label="완료 표시">${t.done ? '✓' : ''}</button>
+    <div class="item-main">
+      <div class="item-title">${esc(t.title)}</div>
+      ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
+    </div>
+    <div class="item-acts">
+      <button type="button" class="btn icon" data-act="form-open" data-type="todo" data-id="${esc(t.id)}"${o.lockSubject ? ' data-lock="1"' : ''} aria-label="수정" title="수정">✏️</button>
+      <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+    </div>
+  </div>`;
+}
+
+/* ===================== 문제집 ===================== */
+
+function bookForm(ui, book, subjectId) {
+  const d = {
+    title: val(ui, 'title', book ? book.title : ''),
+    publisher: val(ui, 'publisher', book ? (book.publisher || '') : ''),
+    total: val(ui, 'total', book ? book.total : ''),
+    unit: val(ui, 'unit', book ? (book.unit || '문항') : '문항'),
+    done: val(ui, 'done', book ? book.done : 0),
+    note: val(ui, 'note', book ? (book.note || '') : ''),
+  };
+  return `<div class="form">
+    ${errLine(ui)}
+    <input type="hidden" data-k="subject" value="${esc(subjectId || '')}">
+    <div class="f-row">
+      <label>문제집 이름<input type="text" data-k="title" value="${esc(d.title)}" placeholder="예: 쎈 미적분"></label>
+      <label>출판사<input type="text" data-k="publisher" value="${esc(d.publisher)}" placeholder="비워도 됩니다"></label>
+    </div>
+    <div class="f-row">
+      <label>전체 분량<input type="number" data-k="total" value="${esc(d.total)}" min="1" placeholder="예: 420"></label>
+      <label class="narrow">단위<input type="text" data-k="unit" value="${esc(d.unit)}" placeholder="문항"></label>
+      <label class="narrow">푼 양<input type="number" data-k="done" value="${esc(d.done)}" min="0"></label>
+    </div>
+    <div class="f-row">
+      <label>메모<textarea data-k="note" rows="2" placeholder="범위, 2회독 여부 등">${esc(d.note)}</textarea></label>
     </div>
     <div class="btn-row">
       <button type="button" class="btn primary" data-act="form-save">저장</button>
@@ -140,27 +235,49 @@ function todoForm(data, ui, todo, ctx) {
   </div>`;
 }
 
-function todoItem(ui, t) {
-  const key = `todo:${t.id}`;
-  if (ui.form && ui.form.type === 'todo' && ui.form.id === t.id) return todoForm(null, ui, t, {});
-  if (ui.pendingDelete === key) return confirmRow(`"${t.title}" 할 일을 정말 삭제할까요?`, key);
+function bookCard(data, ui, b, index, count) {
+  const key = `book:${b.id}`;
+  if (ui.form && ui.form.type === 'book' && ui.form.id === b.id) return bookForm(ui, b, b.subject);
+  if (ui.pendingDelete === key) return confirmRow(`"${b.title}" 문제집을 정말 삭제할까요?`, key);
 
-  const late = daysBetween(ui.today, t.date) < 0;
-  const meta = [];
-  if (late) meta.push(`<span class="badge b-late">${esc(shortDate(t.date))} · 밀림</span>`);
-  else if (t.date !== ui.today) meta.push(`<span class="badge">${esc(shortDate(t.date))} · ${esc(dday(t.date, ui.today))}</span>`);
+  const total = Number(b.total) || 0;
+  const done = Number(b.done) || 0;
+  const p = pct(done, total);
+  const unit = b.unit || '문항';
+  const full = total > 0 && done >= total;
 
-  return `<div class="item t-todo${t.done ? ' is-done' : ''}">
-    <button type="button" class="check" data-act="todo-toggle" data-id="${esc(t.id)}"
-      aria-pressed="${t.done ? 'true' : 'false'}" aria-label="완료 표시">${t.done ? '✓' : ''}</button>
-    <div class="item-main">
-      <div class="item-title">${esc(t.title)}</div>
-      ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
+  return `<div class="book${full ? ' is-full' : ''}">
+    <div class="book-head">
+      <div class="book-main">
+        <div class="book-title">${esc(b.title)}</div>
+        ${b.publisher ? `<div class="book-sub">${esc(b.publisher)}</div>` : ''}
+      </div>
+      <span class="item-acts">
+        <button type="button" class="btn icon" data-act="book-move" data-id="${esc(b.id)}" data-dir="-1" aria-label="위로" title="위로"${index === 0 ? ' disabled' : ''}>↑</button>
+        <button type="button" class="btn icon" data-act="book-move" data-id="${esc(b.id)}" data-dir="1" aria-label="아래로" title="아래로"${index === count - 1 ? ' disabled' : ''}>↓</button>
+        <button type="button" class="btn icon" data-act="form-open" data-type="book" data-id="${esc(b.id)}" aria-label="수정" title="수정">✏️</button>
+        <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+      </span>
     </div>
-    <div class="item-acts">
-      <button type="button" class="btn icon" data-act="form-open" data-type="todo" data-id="${esc(t.id)}" aria-label="수정" title="수정">✏️</button>
-      <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+
+    ${progressBar(done, total)}
+
+    <div class="book-row">
+      <span class="book-pct">${p}%</span>
+      <span class="book-count">
+        <input type="number" class="book-num" data-book="${esc(b.id)}" value="${done}" min="0"${total ? ` max="${total}"` : ''} aria-label="푼 양">
+        <span class="book-of">/ ${total || '—'} ${esc(unit)}</span>
+      </span>
+      <span class="btn-row book-quick">
+        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="-1">−1</button>
+        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="1">+1</button>
+        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="5">+5</button>
+        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="10">+10</button>
+      </span>
     </div>
+
+    ${full ? '<div class="book-full">다 풀었습니다 🎉</div>' : ''}
+    ${b.note ? `<div class="item-note">${esc(b.note)}</div>` : ''}
   </div>`;
 }
 
@@ -197,9 +314,10 @@ export function renderCalendar(data, ui) {
     const shown = list.slice(0, ui.chipLimit);
     const rest = list.length - shown.length;
 
-    const chips = shown.map((ev) => (
-      `<span class="chip c-${esc(ev.type)}${ev.done ? ' is-done' : ''}">${esc(ev.title)}</span>`
-    )).join('');
+    const chips = shown.map((ev) => {
+      const t = typeOf(data, ev.type);
+      return `<span class="chip${ev.done ? ' is-done' : ''}" style="background:${t.color};color:${textOn(t.color)}">${esc(ev.title)}</span>`;
+    }).join('');
 
     const cls = [
       'day',
@@ -216,8 +334,8 @@ export function renderCalendar(data, ui) {
     </button>`;
   }
 
-  const legend = TYPE_KEYS.map((t) => (
-    `<span><i style="background:${TYPES[t].color}"></i>${esc(TYPES[t].label)}</span>`
+  const legend = byOrder(data.types).map((t) => (
+    `<span><i style="background:${normHex(t.color)}"></i>${esc(t.label)}</span>`
   )).join('');
 
   const sel = ui.selDate;
@@ -285,8 +403,8 @@ export function renderToday(data, ui) {
       ${addingTodo ? '' : '<button type="button" class="btn primary" data-act="form-open" data-type="todo">+ 할 일 추가</button>'}
     </div>
     ${addingTodo ? todoForm(data, ui, null, { date: today }) : ''}
-    ${open.length ? open.map((t) => todoItem(ui, t)).join('') : '<p class="empty">할 일이 없습니다.</p>'}
-    ${later.length ? `<h3 class="subhead">예정된 할 일</h3>${later.map((t) => todoItem(ui, t)).join('')}` : ''}
+    ${open.length ? open.map((t) => todoItem(data, ui, t, { showSubject: true })).join('') : '<p class="empty">할 일이 없습니다.</p>'}
+    ${later.length ? `<h3 class="subhead">예정된 할 일</h3>${later.map((t) => todoItem(data, ui, t, { showSubject: true })).join('')}` : ''}
   </section>
 
   <section class="panel">
@@ -336,7 +454,7 @@ export function renderSubject(data, ui, id) {
   const scopeItems = scope.map((line, i) => {
     const key = `scope:${id}:${i}`;
     if (ui.form && ui.form.type === 'scope' && ui.form.subject === id && ui.form.index === i) {
-      return `<li style="display:block"><div class="form" style="margin:0">
+      return `<li class="block"><div class="form" style="margin:0">
         ${errLine(ui)}
         <div class="f-row"><label>내용<input type="text" data-k="line" value="${esc(val(ui, 'line', line))}"></label></div>
         <div class="btn-row">
@@ -345,7 +463,7 @@ export function renderSubject(data, ui, id) {
         </div>
       </div></li>`;
     }
-    if (ui.pendingDelete === key) return `<li style="display:block">${confirmRow('이 줄을 정말 삭제할까요?', key)}</li>`;
+    if (ui.pendingDelete === key) return `<li class="block">${confirmRow('이 줄을 정말 삭제할까요?', key)}</li>`;
     return `<li>
       <span class="s-no">${i + 1}</span>
       <span class="s-text">${esc(line)}</span>
@@ -365,6 +483,25 @@ export function renderSubject(data, ui, id) {
   const upcoming = sortEvents(mine.filter((ev) => daysBetween(ui.today, ev.date) >= 0));
   const past = sortEvents(mine.filter((ev) => daysBetween(ui.today, ev.date) < 0)).reverse();
   const addingEvent = ui.form && ui.form.type === 'event' && !ui.form.id && ui.form.subject === id;
+
+  /* --- 할 일 --- */
+  const myTodos = Object.entries(data.todos)
+    .map(([tid, t]) => ({ id: tid, ...t }))
+    .filter((t) => t.subject === id);
+  const openTodos = myTodos.filter((t) => !t.done)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const doneTodos = myTodos.filter((t) => t.done)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const addingTodo = ui.form && ui.form.type === 'todo' && !ui.form.id && ui.form.subject === id;
+
+  /* --- 문제집 --- */
+  const myBooks = byOrder(data.books).filter((b) => b.subject === id);
+  const addingBook = ui.form && ui.form.type === 'book' && !ui.form.id && ui.form.subject === id;
+  const sumTotal = myBooks.reduce((n, b) => n + (Number(b.total) || 0), 0);
+  const sumDone = myBooks.reduce((n, b) => n + Math.min(Number(b.done) || 0, Number(b.total) || Infinity), 0);
+  const booksCount = myBooks.length > 1 && sumTotal > 0
+    ? `전체 ${sumDone} / ${sumTotal} (${pct(sumDone, sumTotal)}%)`
+    : `${myBooks.length}권`;
 
   /* --- 메모 --- */
   const memoState = ui.memoState[id] || '';
@@ -399,6 +536,27 @@ export function renderSubject(data, ui, id) {
 
   <section class="panel">
     <div class="panel-head">
+      <h2 class="panel-title">할 일<span class="count">남은 것 ${openTodos.length}개</span></h2>
+      ${addingTodo ? '' : `<button type="button" class="btn primary" data-act="form-open" data-type="todo" data-subject="${esc(id)}" data-lock="1">+ 할 일 추가</button>`}
+    </div>
+    ${addingTodo ? todoForm(data, ui, null, { subject: id, date: ui.today, lockSubject: true }) : ''}
+    ${openTodos.length ? openTodos.map((t) => todoItem(data, ui, t, { lockSubject: true, showToday: true })).join('') : '<p class="empty">할 일이 없습니다.</p>'}
+    ${doneTodos.length ? `<h3 class="subhead">끝낸 할 일</h3>${doneTodos.map((t) => todoItem(data, ui, t, { lockSubject: true })).join('')}` : ''}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">문제집<span class="count">${esc(booksCount)}</span></h2>
+      ${addingBook ? '' : `<button type="button" class="btn primary" data-act="form-open" data-type="book" data-subject="${esc(id)}">+ 문제집 추가</button>`}
+    </div>
+    ${addingBook ? bookForm(ui, null, id) : ''}
+    ${myBooks.length
+    ? myBooks.map((b, i) => bookCard(data, ui, b, i, myBooks.length)).join('')
+    : '<p class="empty">등록한 문제집이 없습니다. 추가하면 진행률 바가 생깁니다.</p>'}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
       <h2 class="panel-title">메모</h2>
       <span class="save-state ${memoState === '저장됨' ? 'ok' : (memoState && memoState !== '저장 중…' ? 'err' : '')}">${esc(memoState)}</span>
     </div>
@@ -415,7 +573,7 @@ export function renderSubject(data, ui, id) {
       ${ui.pendingDelete === `subject:${id}` ? '' : `<button type="button" class="btn danger" data-act="del-ask" data-key="subject:${esc(id)}">이 과목 삭제</button>`}
     </div>
     ${ui.pendingDelete === `subject:${id}`
-    ? `<div style="margin-top:8px">${confirmRow(`"${s.name}" 과목을 정말 삭제할까요? 연결된 일정은 지워지지 않고 "과목 없음"으로 남습니다.`, `subject:${id}`)}</div>`
+    ? `<div style="margin-top:8px">${confirmRow(`"${s.name}" 과목을 정말 삭제할까요? 연결된 일정·할 일·문제집은 지워지지 않고 "과목 없음"으로 남습니다.`, `subject:${id}`)}</div>`
     : ''}
   </section>`;
 }
@@ -474,19 +632,59 @@ function linkForm(ui, l) {
 
 /* ===================== 설정 탭 ===================== */
 
+function typeForm(ui, t) {
+  return `<div class="form">
+    ${errLine(ui)}
+    <div class="f-row">
+      <label>이름<input type="text" data-k="label" value="${esc(val(ui, 'label', t ? t.label : ''))}" placeholder="예: 발표"></label>
+      <label class="narrow">색<input type="color" data-k="color" value="${esc(val(ui, 'color', t ? normHex(t.color) : '#2f5bd7'))}"></label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+    </div>
+  </div>`;
+}
+
 export function renderSettings(data, ui, store) {
   const st = (data.settings || {}).main || {};
   const subjects = byOrder(data.subjects);
+  const types = byOrder(data.types);
   const addingSubject = ui.form && ui.form.type === 'subject-new';
+  const addingType = ui.form && ui.form.type === 'type' && !ui.form.id;
+
+  const usedCount = (typeId) => Object.values(data.events).filter((e) => e.type === typeId).length;
+
+  const typeRows = types.map((t, i) => {
+    const key = `type:${t.id}`;
+    if (ui.form && ui.form.type === 'type' && ui.form.id === t.id) return typeForm(ui, t);
+    const n = usedCount(t.id);
+    if (ui.pendingDelete === key) {
+      return confirmRow(
+        `"${t.label}" 종류를 정말 삭제할까요?${n ? ` 이 종류를 쓰는 일정 ${n}개는 지워지지 않고 "기타"로 남습니다.` : ''}`,
+        key,
+      );
+    }
+    return `<div class="rowline">
+      <i class="swatch" style="background:${normHex(t.color)}"></i>
+      <span class="r-name">${esc(t.label)}</span>
+      <span class="muted" style="flex:0 0 auto">${n}개</span>
+      <span class="item-acts">
+        <button type="button" class="btn icon" data-act="type-move" data-id="${esc(t.id)}" data-dir="-1" aria-label="위로" title="위로"${i === 0 ? ' disabled' : ''}>↑</button>
+        <button type="button" class="btn icon" data-act="type-move" data-id="${esc(t.id)}" data-dir="1" aria-label="아래로" title="아래로"${i === types.length - 1 ? ' disabled' : ''}>↓</button>
+        <button type="button" class="btn icon" data-act="form-open" data-type="type" data-id="${esc(t.id)}" aria-label="수정" title="수정">✏️</button>
+        <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+      </span>
+    </div>`;
+  }).join('');
 
   const subjectRows = subjects.map((s, i) => {
     const key = `subject:${s.id}`;
     if (ui.pendingDelete === key) {
-      return confirmRow(`"${s.name}" 과목을 정말 삭제할까요? 연결된 일정은 "과목 없음"으로 남습니다.`, key);
+      return confirmRow(`"${s.name}" 과목을 정말 삭제할까요? 연결된 일정·할 일·문제집은 "과목 없음"으로 남습니다.`, key);
     }
     return `<div class="rowline">
       <span class="r-name">${esc(s.name)}</span>
-      <span class="muted" style="flex:0 0 auto">${esc(s.id)}</span>
       <span class="item-acts">
         <button type="button" class="btn icon" data-act="subject-move" data-id="${esc(s.id)}" data-dir="-1" aria-label="위로" title="위로"${i === 0 ? ' disabled' : ''}>↑</button>
         <button type="button" class="btn icon" data-act="subject-move" data-id="${esc(s.id)}" data-dir="1" aria-label="아래로" title="아래로"${i === subjects.length - 1 ? ' disabled' : ''}>↓</button>
@@ -510,6 +708,16 @@ export function renderSettings(data, ui, store) {
       <label>끝<input type="date" data-set="examEnd" value="${esc(st.examEnd || '')}"></label>
     </div>
     <p class="muted" style="margin:8px 0 0">위쪽 요약 카드의 기말고사 D-day 가 이 날짜를 기준으로 계산됩니다.</p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">일정 종류<span class="count">${types.length}개</span></h2>
+      ${addingType ? '' : '<button type="button" class="btn primary" data-act="form-open" data-type="type">+ 종류 추가</button>'}
+    </div>
+    ${addingType ? typeForm(ui, null) : ''}
+    ${types.length ? typeRows : '<p class="empty">종류가 없습니다.</p>'}
+    <p class="muted" style="margin:8px 0 0">일정을 추가할 때 종류 칸에서 "＋ 직접 입력"을 골라도 새 종류가 만들어집니다.</p>
   </section>
 
   <section class="panel">
@@ -540,7 +748,7 @@ export function renderSettings(data, ui, store) {
     ${ui.pendingImport
     ? `<div style="margin-top:8px">${confirmRow(`"${ui.pendingImport.name}" 파일로 전체 데이터를 교체할까요? 지금 내용은 사라집니다.`, 'import', '가져오기')}</div>`
     : ''}
-    <p class="muted" style="margin:8px 0 0">내보낸 파일 하나에 일정·할 일·과목·바로가기·설정이 모두 들어 있습니다.</p>
+    <p class="muted" style="margin:8px 0 0">내보낸 파일 하나에 일정·할 일·과목·문제집·종류·바로가기·설정이 모두 들어 있습니다.</p>
   </section>
 
   <section class="panel">

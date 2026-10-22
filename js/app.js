@@ -2,6 +2,7 @@
 
 import {
   todayKey, parseKey, longDate, isKey, debounce, byOrder, newId, esc,
+  normHex, clampCount,
 } from './util.js';
 import {
   store, subscribe, init, one, put, patch, add, remove, putMany,
@@ -9,7 +10,7 @@ import {
 } from './store.js';
 import {
   renderCalendar, renderToday, renderSubject, renderLinks, renderSettings,
-  renderSummary, renderGate,
+  renderSummary, renderGate, NEW_TYPE,
 } from './views.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -119,12 +120,13 @@ function openForm(ds) {
     date: ds.date || null,
     subject: ds.subject === undefined ? null : ds.subject,
     index: ds.index === undefined ? null : Number(ds.index),
+    lockSubject: ds.lock === '1',
   };
   ui.draft = {};
   ui.formError = '';
   ui.pendingDelete = null;
   render();
-  const first = elView.querySelector('.form [data-k]');
+  const first = elView.querySelector('.form [data-k]:not([type="hidden"])');
   if (first) first.focus();
 }
 
@@ -146,6 +148,22 @@ function formFail(msg, values) {
   render();
 }
 
+function nextOrder(coll) {
+  const list = byOrder(store.data[coll]);
+  return list.length ? (Number(list[list.length - 1].order) || list.length) + 1 : 1;
+}
+
+// 일정 폼에서 "직접 입력"으로 고른 새 종류를 만든다
+async function createType(label, color) {
+  const id = newId('type');
+  await put('types', id, {
+    order: nextOrder('types'),
+    label,
+    color: normHex(color, '#2f5bd7'),
+  });
+  return id;
+}
+
 async function saveForm() {
   if (!ui.form) return;
   if (!canEdit()) { toast('로그인한 뒤에 고칠 수 있습니다.', true); return; }
@@ -158,10 +176,18 @@ async function saveForm() {
       const title = (f.title || '').trim();
       if (!title) return formFail('제목을 적어 주세요.', f);
       if (!isKey(f.date)) return formFail('날짜를 골라 주세요.', f);
+
+      let typeId = f.type || 'perf';
+      if (typeId === NEW_TYPE) {
+        const label = (f.newTypeLabel || '').trim();
+        if (!label) return formFail('새 종류의 이름을 적어 주세요.', f);
+        typeId = await createType(label, f.newTypeColor);
+      }
+
       const base = ui.form.id ? one('events', ui.form.id) : null;
       const obj = {
         date: f.date,
-        type: f.type || 'perf',
+        type: typeId,
         title,
         note: (f.note || '').trim(),
         subject: f.subject || '',
@@ -178,11 +204,30 @@ async function saveForm() {
       const obj = {
         date: f.date,
         title,
+        subject: f.subject || '',
         done: base ? Boolean(base.done) : false,
         createdAt: base && base.createdAt ? base.createdAt : new Date().toISOString(),
       };
       if (ui.form.id) await patch('todos', ui.form.id, obj);
       else await add('todos', obj, 'todo');
+    } else if (type === 'book') {
+      const title = (f.title || '').trim();
+      if (!title) return formFail('문제집 이름을 적어 주세요.', f);
+      const total = Math.max(0, Math.round(Number(f.total) || 0));
+      if (total <= 0) return formFail('전체 분량을 1 이상으로 적어 주세요.', f);
+      const base = ui.form.id ? one('books', ui.form.id) : null;
+      const obj = {
+        subject: f.subject || '',
+        order: base ? base.order : nextOrder('books'),
+        title,
+        publisher: (f.publisher || '').trim(),
+        unit: (f.unit || '').trim() || '문항',
+        total,
+        done: clampCount(f.done, total),
+        note: (f.note || '').trim(),
+      };
+      if (ui.form.id) await patch('books', ui.form.id, obj);
+      else await add('books', obj, 'book');
     } else if (type === 'scope') {
       const line = (f.line || '').trim();
       if (!line) return formFail('내용을 적어 주세요.', f);
@@ -200,18 +245,22 @@ async function saveForm() {
     } else if (type === 'subject-new') {
       const name = (f.name || '').trim();
       if (!name) return formFail('과목 이름을 적어 주세요.', f);
-      const list = byOrder(store.data.subjects);
-      const order = list.length ? (list[list.length - 1].order || list.length) + 1 : 1;
-      await put('subjects', newId('sub'), { order, name, scope: [], memo: '' });
+      await put('subjects', newId('sub'), {
+        order: nextOrder('subjects'), name, scope: [], memo: '',
+      });
+    } else if (type === 'type') {
+      const label = (f.label || '').trim();
+      if (!label) return formFail('종류 이름을 적어 주세요.', f);
+      const color = normHex(f.color, '#2f5bd7');
+      if (ui.form.id) await patch('types', ui.form.id, { label, color });
+      else await put('types', newId('type'), { order: nextOrder('types'), label, color });
     } else if (type === 'link') {
       const title = (f.title || '').trim();
       const url = (f.url || '').trim();
       if (!title) return formFail('이름을 적어 주세요.', f);
       if (!url) return formFail('주소를 적어 주세요.', f);
       const base = ui.form.id ? one('links', ui.form.id) : null;
-      const list = byOrder(store.data.links);
-      const order = base ? base.order : (list.length ? (list[list.length - 1].order || list.length) + 1 : 1);
-      const obj = { order, title, url };
+      const obj = { order: base ? base.order : nextOrder('links'), title, url };
       if (ui.form.id) await patch('links', ui.form.id, obj);
       else await add('links', obj, 'link');
     }
@@ -236,6 +285,8 @@ async function runDelete(key) {
     if (kind === 'ev') await remove('events', parts[1]);
     else if (kind === 'todo') await remove('todos', parts[1]);
     else if (kind === 'link') await remove('links', parts[1]);
+    else if (kind === 'book') await remove('books', parts[1]);
+    else if (kind === 'type') await remove('types', parts[1]);
     else if (kind === 'subject') {
       await remove('subjects', parts[1]);
       if (ui.tab === parts[1]) { ui.pendingDelete = null; setTab('calendar'); return; }
@@ -285,6 +336,27 @@ async function moveOrdered(coll, id, dir) {
   }
 }
 
+// 문제집은 같은 과목 안에서만 순서를 바꾼다
+async function moveBook(id, dir) {
+  const book = one('books', id);
+  if (!book) return;
+  const list = byOrder(store.data.books).filter((b) => b.subject === book.subject);
+  const i = list.findIndex((x) => x.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const reordered = list.slice();
+  [reordered[i], reordered[j]] = [reordered[j], reordered[i]];
+  const writes = reordered.map((item, idx) => {
+    const { id: itemId, ...rest } = item;
+    return ['books', itemId, { ...rest, order: idx + 1 }];
+  });
+  try {
+    await putMany(writes);
+  } catch (e) {
+    toast(`순서 저장 실패: ${errMsg(e)}`, true);
+  }
+}
+
 async function moveScope(sid, index, dir) {
   const s = one('subjects', sid);
   if (!s) return;
@@ -299,7 +371,7 @@ async function moveScope(sid, index, dir) {
   }
 }
 
-/* ===================== 체크 ===================== */
+/* ===================== 체크 / 진행률 ===================== */
 
 async function toggleDoc(coll, id) {
   const cur = one(coll, id);
@@ -310,6 +382,18 @@ async function toggleDoc(coll, id) {
   if (coll === 'todos') changes.doneAt = done ? ui.today : '';
   try {
     await patch(coll, id, changes);
+  } catch (e) {
+    toast(`저장 실패: ${errMsg(e)}`, true);
+  }
+}
+
+async function setBookDone(id, value) {
+  const b = one('books', id);
+  if (!b) return;
+  const next = clampCount(value, b.total);
+  if (next === (Number(b.done) || 0)) return;
+  try {
+    await patch('books', id, { done: next });
   } catch (e) {
     toast(`저장 실패: ${errMsg(e)}`, true);
   }
@@ -396,6 +480,13 @@ const handlers = {
   'scope-move': (el) => { moveScope(el.dataset.subject, Number(el.dataset.index), Number(el.dataset.dir)); },
   'subject-move': (el) => { moveOrdered('subjects', el.dataset.id, Number(el.dataset.dir)); },
   'link-move': (el) => { moveOrdered('links', el.dataset.id, Number(el.dataset.dir)); },
+  'type-move': (el) => { moveOrdered('types', el.dataset.id, Number(el.dataset.dir)); },
+  'book-move': (el) => { moveBook(el.dataset.id, Number(el.dataset.dir)); },
+  'book-add': (el) => {
+    const b = one('books', el.dataset.id);
+    if (!b) return;
+    setBookDone(el.dataset.id, (Number(b.done) || 0) + Number(el.dataset.n));
+  },
   export: () => doExport(),
   import: () => elImport.click(),
   login: async () => {
@@ -442,12 +533,28 @@ document.addEventListener('blur', (e) => {
 
 document.addEventListener('change', async (e) => {
   const el = e.target;
-  if (!el.dataset || !el.dataset.set) return;
-  try {
-    await patch('settings', 'main', { [el.dataset.set]: el.value });
-    toast('저장됨');
-  } catch (err) {
-    toast(`저장 실패: ${errMsg(err)}`, true);
+  if (!el.dataset) return;
+
+  // 종류를 "직접 입력"으로 바꾸면 이름·색 칸이 나타나야 한다
+  if (el.dataset.k === 'type') {
+    ui.draft.type = el.value;
+    render();
+    return;
+  }
+
+  // 문제집 진행량 직접 입력
+  if (el.dataset.book) {
+    setBookDone(el.dataset.book, el.value);
+    return;
+  }
+
+  if (el.dataset.set) {
+    try {
+      await patch('settings', 'main', { [el.dataset.set]: el.value });
+      toast('저장됨');
+    } catch (err) {
+      toast(`저장 실패: ${errMsg(err)}`, true);
+    }
   }
 });
 
@@ -456,7 +563,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && ui.form) { closeForm(); render(); return; }
   if (e.key !== 'Enter') return;
   const el = e.target;
-  if (!el.dataset || !el.dataset.k) return;
+  if (!el.dataset) return;
+  if (el.dataset.book) { el.blur(); return; }
+  if (!el.dataset.k) return;
   if (el.tagName === 'TEXTAREA') return;
   e.preventDefault();
   saveForm();
@@ -476,6 +585,7 @@ function snapshotFocus() {
   let sel = null;
   if (d.k) sel = `.form [data-k="${d.k}"]`;
   else if (d.memo) sel = `[data-memo="${CSS.escape(d.memo)}"]`;
+  else if (d.book) sel = `[data-book="${CSS.escape(d.book)}"]`;
   else if (d.set) sel = `[data-set="${d.set}"]`;
   if (!sel) return null;
   let s = null;

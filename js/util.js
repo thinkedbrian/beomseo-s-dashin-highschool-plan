@@ -1,4 +1,4 @@
-// 날짜·문자열 공용 도구
+// 날짜·색·문자열 공용 도구
 
 export const pad = (n) => String(n).padStart(2, '0');
 
@@ -61,19 +61,87 @@ export function dday(key, base) {
   return `${-n}일 전`;
 }
 
-export const TYPES = {
-  perf: { label: '수행평가', color: 'var(--perf)' },
-  read: { label: '독서 수행', color: 'var(--read)' },
-  exam: { label: '시험', color: 'var(--exam)' },
-  school: { label: '학사일정', color: 'var(--school)' },
-  todo: { label: '할 일', color: 'var(--todo)' },
-};
+/* ===================== 일정 종류 ===================== */
+// 종류는 types 컬렉션에 들어 있고 사이트 안에서 추가·수정할 수 있습니다.
+// 아래는 처음 한 번 넣어 주는 기본값입니다.
 
-export const TYPE_KEYS = ['perf', 'read', 'exam', 'school', 'todo'];
+export const DEFAULT_TYPES = [
+  ['perf', '수행평가', '#2f6fd0'],
+  ['read', '독서 수행', '#7c4dbd'],
+  ['exam', '시험', '#d8384a'],
+  ['school', '학사일정', '#2e9e62'],
+  ['todo', '할 일', '#bd7a14'],
+];
 
-export function typeLabel(t) {
-  return (TYPES[t] || {}).label || '기타';
+const FALLBACK = { label: '기타', color: '#7b8595' };
+
+// 삭제된 종류를 가진 일정도 "기타"로 안전하게 보여 줍니다.
+export function typeOf(data, id) {
+  const t = ((data && data.types) || {})[id];
+  if (t) return { id, label: t.label || FALLBACK.label, color: normHex(t.color, FALLBACK.color) };
+  return { id: id || '', label: FALLBACK.label, color: FALLBACK.color };
 }
+
+/* ===================== 색 ===================== */
+
+function hexToRgb(hex) {
+  let h = String(hex || '').trim().replace(/^#/, '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) h = '7b8595';
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+export function normHex(value, fallback) {
+  const h = String(value || '').trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(h)) return h.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(h)) {
+    return `#${h.slice(1).split('').map((c) => c + c).join('')}`.toLowerCase();
+  }
+  return fallback || FALLBACK.color;
+}
+
+export function rgba(hex, alpha) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function channel(v) {
+  const c = v / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+// 그 색 위에 올릴 글자색 (밝으면 검정, 어두우면 흰색)
+// 0.18 은 검정과 흰색의 대비가 뒤집히는 지점이라, 주황·초록처럼
+// 중간 밝기 색에서도 읽히는 쪽이 골라집니다.
+export function textOn(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  const lum = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  return lum > 0.18 ? '#14161b' : '#ffffff';
+}
+
+// 다크 모드에서 글자색으로 쓰려고 밝게 만든 색
+export function lighten(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  const up = (c) => Math.round(c + (255 - c) * amount);
+  return `rgb(${up(r)}, ${up(g)}, ${up(b)})`;
+}
+
+/* ===================== 진행률 ===================== */
+
+export function pct(done, total) {
+  const d = Number(done) || 0;
+  const t = Number(total) || 0;
+  if (t <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((d / t) * 100)));
+}
+
+export function clampCount(value, total) {
+  const n = Math.max(0, Math.round(Number(value) || 0));
+  const t = Number(total) || 0;
+  return t > 0 ? Math.min(n, t) : n;
+}
+
+/* ===================== 기타 ===================== */
 
 export function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (

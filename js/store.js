@@ -5,12 +5,12 @@
 
 import { SEED } from './seed.js';
 import { firebaseConfig, OWNER_UID } from './firebase-config.js';
-import { newId } from './util.js';
+import { newId, DEFAULT_TYPES } from './util.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 const LS_KEY = 'pjs-planner-v1';
 
-export const COLLS = ['events', 'todos', 'subjects', 'links', 'settings'];
+export const COLLS = ['events', 'todos', 'subjects', 'links', 'settings', 'types', 'books'];
 
 const listeners = new Set();
 let fb = null;      // { auth, db, A, F }
@@ -19,7 +19,9 @@ let pendingFirst = 0;
 let seeding = false;
 
 function blank() {
-  return { events: {}, todos: {}, subjects: {}, links: {}, settings: {} };
+  const out = {};
+  COLLS.forEach((c) => { out[c] = {}; });
+  return out;
 }
 
 export const store = {
@@ -81,7 +83,7 @@ export async function init() {
     store.mode = 'local';
     setStatus('local', '이 기기에만 저장');
     loadLocal();
-    await seedIfEmpty();
+    await prepare();
     // 같은 브라우저의 다른 창/탭에서 고친 내용도 바로 반영
     window.addEventListener('storage', (e) => {
       if (e.key !== LS_KEY) return;
@@ -104,7 +106,7 @@ export async function init() {
     store.lastError = `Firebase 연결 실패: ${err.message || err}`;
     setStatus('local', '로컬 저장 (연결 실패)');
     loadLocal();
-    await seedIfEmpty();
+    await prepare();
     emit();
   }
 }
@@ -165,7 +167,7 @@ function attach() {
       setStatus('online', '연결됨');
       if (pendingFirst > 0) {
         pendingFirst -= 1;
-        if (pendingFirst === 0) seedIfEmpty().catch(console.error);
+        if (pendingFirst === 0) prepare().catch(console.error);
       }
       emit();
     },
@@ -198,6 +200,26 @@ async function seedIfEmpty() {
   } finally {
     seeding = false;
   }
+}
+
+// 이미 쓰던 수첩에 나중에 생긴 컬렉션을 채워 준다.
+// (전체가 비어 있을 때만 도는 seedIfEmpty 로는 안 들어가기 때문)
+async function ensureDefaults() {
+  if (seeding) return;
+  if (Object.keys(store.data.types || {}).length > 0) return;
+  const writes = DEFAULT_TYPES.map(([id, label, color], i) => (
+    ['types', id, { order: i + 1, label, color }]
+  ));
+  try {
+    await putMany(writes);
+  } catch (err) {
+    console.error('기본 종류를 넣지 못했습니다', err);
+  }
+}
+
+async function prepare() {
+  await seedIfEmpty();
+  await ensureDefaults();
 }
 
 /* ---------- 읽기 ---------- */

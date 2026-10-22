@@ -1,5 +1,7 @@
 // 처음 실행할 때 한 번만 들어가는 초기 데이터
 
+import { DEFAULT_TYPES } from './util.js';
+
 const SUBJECTS = [
   ['kor', '국어', ['3, 4단원 + 10월 모의고사 독서 부분']],
   ['eng', '영어', [
@@ -80,11 +82,18 @@ function buildSeed() {
     links[`seed-link-${i + 1}`] = { order: i + 1, title, url };
   });
 
+  const types = {};
+  DEFAULT_TYPES.forEach(([id, label, color], i) => {
+    types[id] = { order: i + 1, label, color };
+  });
+
   return {
     events,
     todos: {},
     subjects,
     links,
+    types,
+    books: {},
     settings: { main: { examStart: '2026-12-07', examEnd: '2026-12-10' } },
   };
 }
