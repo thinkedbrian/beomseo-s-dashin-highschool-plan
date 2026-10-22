@@ -1,0 +1,208 @@
+# 2학기 일정 수첩
+
+학교 일정·과목별 시험범위·수행평가·메모를 한 곳에서 관리하는 개인 수첩.
+빌드 없이 돌아가는 정적 사이트(HTML + CSS + 순수 JS 모듈)라서 GitHub Pages에 그대로 올리면 됩니다.
+
+```
+schedule-planner/
+├─ index.html
+├─ css/styles.css
+├─ js/
+│  ├─ app.js             ← 상태·라우팅·이벤트 처리
+│  ├─ views.js           ← 화면 HTML 만들기
+│  ├─ store.js           ← 저장 어댑터 (로컬 ↔ Firestore)
+│  ├─ seed.js            ← 처음 한 번 들어가는 초기 데이터
+│  ├─ util.js            ← 날짜·문자열 도구
+│  └─ firebase-config.js ← ★ Firebase 설정값을 넣는 곳
+├─ firestore.rules       ← 보안 규칙 (콘솔에 붙여넣기용)
+└─ README.md
+```
+
+## 두 가지 모드
+
+`js/firebase-config.js` 하나로 모드가 갈립니다.
+
+| | 로컬 모드 (기본) | 동기화 모드 |
+|---|---|---|
+| 조건 | `firebase-config.js` 가 비어 있음 | 설정값을 채움 |
+| 저장 위치 | 그 브라우저 안 (localStorage) | Firestore |
+| 폰 ↔ 컴퓨터 | 따로 (JSON으로 옮기기) | 실시간으로 같이 |
+| 로그인 | 없음 | Google 로그인 필요 |
+| 설정 시간 | 0분 | 15~25분 |
+
+지금은 **로컬 모드**입니다. 그대로 올려서 써도 되고, 아래 순서대로 Firebase를 붙이면
+`firebase-config.js` 만 바꿔도 자동으로 동기화 모드로 바뀝니다. (다른 파일은 손댈 필요 없음)
+
+> 로컬 모드에서도 **같은 브라우저의 다른 창/탭**끼리는 실시간으로 맞춰집니다.
+> 폰과 컴퓨터처럼 **기기가 다르면** 동기화 모드가 필요합니다.
+
+---
+
+## 1. 먼저 GitHub Pages에 올리기
+
+1. GitHub에서 새 저장소를 만듭니다. 이름은 아무거나 (예: `planner`), **Public**.
+2. 이 `schedule-planner` 폴더 안의 파일들을 저장소 **최상단**에 올립니다.
+   `index.html` 이 저장소 맨 위에 보여야 합니다. (`schedule-planner/index.html` 이면 안 됨)
+   - 웹에서 올릴 때: 저장소 → **Add file → Upload files** → `index.html`, `css` 폴더, `js` 폴더를 끌어다 놓고 **Commit changes**
+   - 명령어로 올릴 때:
+     ```bash
+     cd schedule-planner
+     git init
+     git add .
+     git commit -m "일정 수첩"
+     git branch -M main
+     git remote add origin https://github.com/내아이디/planner.git
+     git push -u origin main
+     ```
+3. 저장소 → **Settings → Pages**
+   - Source: **Deploy from a branch**
+   - Branch: **main** / **/ (root)** → **Save**
+4. 1~2분 뒤 `https://내아이디.github.io/planner/` 로 열립니다. **이 주소를 적어 두세요.** 3단계에서 씁니다.
+
+여기까지만 해도 수첩은 완전히 동작합니다(로컬 모드).
+
+---
+
+## 2. Firebase 프로젝트 만들기
+
+처음이라고 가정하고 누를 것만 적었습니다. 무료 요금제(Spark)로 충분합니다.
+
+### 2-1. 프로젝트 만들기
+1. <https://console.firebase.google.com> 에 Google 계정으로 로그인
+2. **프로젝트 만들기** 클릭
+3. 프로젝트 이름: `일정수첩` 같은 아무 이름 → **계속**
+4. Google 애널리틱스: **사용 안 함**으로 꺼도 됩니다 → **프로젝트 만들기**
+5. 완료되면 **계속** → 프로젝트 홈 화면이 나옵니다
+
+### 2-2. 웹 앱 등록하고 설정값 받기
+1. 프로젝트 홈 가운데의 **`</>` (웹)** 아이콘 클릭
+2. 앱 닉네임: `planner` → **앱 등록**
+   (※ "Firebase 호스팅도 설정" 체크박스는 **체크하지 마세요.** GitHub Pages를 쓰니까요)
+3. 다음 화면에 이런 코드가 나옵니다:
+   ```js
+   const firebaseConfig = {
+     apiKey: "AIzaSy...",
+     authDomain: "일정수첩-1234.firebaseapp.com",
+     projectId: "일정수첩-1234",
+     storageBucket: "일정수첩-1234.appspot.com",
+     messagingSenderId: "123456789",
+     appId: "1:123456789:web:abc..."
+   };
+   ```
+4. 이 여섯 줄을 그대로 복사해서 **`js/firebase-config.js`** 의 같은 자리에 붙여넣습니다.
+   (따옴표는 `'` 든 `"` 든 상관없습니다)
+   ```js
+   export const firebaseConfig = {
+     apiKey: 'AIzaSy...',
+     authDomain: '일정수첩-1234.firebaseapp.com',
+     projectId: '일정수첩-1234',
+     storageBucket: '일정수첩-1234.appspot.com',
+     messagingSenderId: '123456789',
+     appId: '1:123456789:web:abc...',
+   };
+   ```
+   > `apiKey` 는 비밀번호가 아니라 **프로젝트 주소표**라서 공개되어도 괜찮습니다.
+   > 실제 보호는 4단계의 보안 규칙이 합니다.
+
+### 2-3. Google 로그인 켜기
+1. 왼쪽 메뉴 **빌드 → Authentication** → **시작하기**
+2. **Sign-in method** 탭 → 목록에서 **Google** 클릭
+3. 오른쪽 위 **사용 설정** 토글을 켬
+4. "프로젝트 지원 이메일"에 내 Gmail 주소 선택 → **저장**
+
+### 2-4. Firestore 만들기
+1. 왼쪽 메뉴 **빌드 → Firestore Database** → **데이터베이스 만들기**
+2. 위치: **asia-northeast3 (서울)** 선택 → 다음
+   (※ 위치는 나중에 못 바꿉니다)
+3. 모드: **프로덕션 모드에서 시작** 선택 → **만들기**
+   (테스트 모드는 30일 뒤에 막히고 그동안 누구나 읽을 수 있으니 쓰지 마세요)
+
+---
+
+## 3. 내 사이트 주소를 Firebase에 등록하기
+
+이걸 빼먹으면 로그인 버튼을 눌러도 창이 바로 닫힙니다.
+
+1. **Authentication → Settings(설정) 탭 → 승인된 도메인**
+2. **도메인 추가** 를 눌러 다음 둘을 넣습니다:
+   - `내아이디.github.io`  ← 1단계에서 적어 둔 주소의 **도메인 부분만** (뒤의 `/planner/` 는 빼고)
+   - `localhost`  ← 컴퓨터에서 시험 삼아 열어 볼 때 필요
+3. `firebase.app`, `firebaseapp.com` 은 원래 들어 있으니 그대로 두세요.
+
+---
+
+## 4. 보안 규칙 넣기 (나만 보게 막는 단계)
+
+1. **Firestore Database → 규칙** 탭
+2. 안에 있던 내용을 **전부 지우고**, 이 폴더의 **`firestore.rules`** 파일 내용을 붙여넣습니다.
+3. **게시** 클릭
+
+이러면 이렇게 됩니다:
+
+- 로그인하지 않은 사람 → **아무것도 못 읽고 못 씁니다** (사이트 주소를 알아도)
+- 로그인한 사람 → **자기 폴더(`users/자기UID`)만** 읽고 씁니다. 내 내용은 못 봅니다.
+
+**완전히 나만 쓰게 잠그려면** (다른 사람이 자기 수첩조차 못 만들게):
+
+1. 한 번 사이트에서 Google 로그인을 합니다.
+2. **Authentication → Users** 에 내 계정이 생기고, 그 줄에 **사용자 UID**(`aBcD12...` 같은 긴 문자)가 보입니다.
+3. 그 UID를 복사해서
+   - `js/firebase-config.js` 의 `OWNER_UID` 에 넣고,
+   - `firestore.rules` 아래쪽 주석에 적힌 대로 규칙도 바꿔서 다시 **게시** 합니다.
+
+> `OWNER_UID` 는 화면을 막는 용도고, 진짜로 막아 주는 건 **규칙** 쪽입니다. 둘 다 바꾸세요.
+
+---
+
+## 5. 올리고 확인하기
+
+1. 바뀐 `js/firebase-config.js` 를 GitHub에 다시 올립니다(커밋 & 푸시).
+2. 1~2분 뒤 사이트를 새로고침하면 **Google 로그인 화면**이 먼저 나옵니다.
+3. 로그인하면 초기 데이터가 자동으로 들어가고, 헤더에 **연결됨** 이라고 표시됩니다.
+4. 폰에서도 같은 주소로 들어가 같은 계정으로 로그인하면, 한쪽에서 고친 내용이 **새로고침 없이** 다른 쪽에 나타납니다.
+
+### 잘 안 될 때
+
+| 증상 | 원인 / 해결 |
+|---|---|
+| 로그인 창이 열렸다가 바로 닫힘 | 3단계 **승인된 도메인**에 내 주소를 안 넣었습니다 |
+| 헤더에 "권한 없음" | 4단계 **규칙**을 게시하지 않았거나 오타. 규칙 탭에서 다시 게시 |
+| 계속 "이 기기에만 저장" | `firebase-config.js` 의 `apiKey` / `projectId` / `appId` 중 빈 칸이 있습니다 |
+| "허용되지 않은 계정" | `OWNER_UID` 와 지금 로그인한 계정이 다릅니다 |
+| 팝업이 막혔다고 나옴 | 브라우저 주소창 옆에서 팝업 허용 |
+
+---
+
+## 쓰는 법 간단 정리
+
+- **탭 주소**: 보고 있는 탭이 주소 뒤에 `#kor`, `#calendar` 처럼 남아서 새로고침해도 그대로 열립니다. 즐겨찾기도 과목별로 따로 가능합니다.
+- **고치기**: 각 줄의 ✏️ 를 누르면 그 자리에서 입력칸으로 바뀝니다. **Enter** 로 저장, **Esc** 로 취소.
+- **삭제**: 🗑 → 화면 안에서 "정말 삭제할까요?" 가 뜨고 **삭제 / 취소** 를 고릅니다.
+- **메모**: 그냥 쓰면 됩니다. 입력을 멈추면 자동 저장되고 "저장됨" 이 뜹니다.
+- **과목 추가·순서·기말고사 날짜·백업**: 탭 바 맨 끝 **⚙ 설정**.
+- **과목 삭제**: 연결된 일정은 지워지지 않고 "과목 없음" 으로 남습니다.
+- **백업**: 설정 탭 → **JSON 내보내기** 로 파일 하나에 전부 저장, **JSON 가져오기** 로 그대로 복원.
+  기기를 바꾸거나 로컬 모드 ↔ 동기화 모드로 옮길 때 이걸 쓰면 됩니다.
+
+## 데이터 구조
+
+```
+events/{id}    { date: "2026-10-23", type: "perf"|"read"|"exam"|"school"|"todo",
+                 title, note, subject: "calc2", done: false }
+todos/{id}     { date, title, done, doneAt, createdAt }
+subjects/{id}  { order: 1, name: "국어", scope: ["…"], memo: "" }
+links/{id}     { order: 1, title, url }
+settings/main  { examStart: "2026-12-07", examEnd: "2026-12-10" }
+```
+
+동기화 모드에서는 모두 `users/{내UID}/` 아래에 들어갑니다.
+
+## 컴퓨터에서 미리 보기
+
+ES 모듈을 쓰기 때문에 `index.html` 을 더블클릭하면 열리지 않습니다. 간단한 서버로 띄우세요.
+
+```bash
+python -m http.server 5577
+```
+
+그 다음 브라우저에서 <http://localhost:5577> 을 엽니다.

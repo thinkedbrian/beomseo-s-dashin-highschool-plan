@@ -1,0 +1,21 @@
+# OneDrive / 윈도우가 만드는 파일
+Thumbs.db
+desktop.ini
+ehthumbs.db
+*.lnk
+
+# macOS
+.DS_Store
+
+# 편집기
+.vscode/
+.idea/
+*.swp
+
+# 로그
+*.log
+
+# ※ js/firebase-config.js 는 일부러 제외하지 않았습니다.
+#    사이트가 돌아가려면 함께 올라가야 하고, apiKey 는 비밀번호가 아니라
+#    프로젝트를 가리키는 주소표라서 공개되어도 괜찮습니다.
+#    실제 보호는 firestore.rules 의 보안 규칙이 합니다.

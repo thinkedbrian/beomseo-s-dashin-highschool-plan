@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2학기 일정 수첩</title>
+<meta name="description" content="학교 일정과 과목별 시험범위·수행평가를 관리하는 개인 수첩">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%232f5bd7'/><rect x='14' y='18' width='36' height='30' rx='4' fill='%23fff'/><rect x='14' y='18' width='36' height='7' fill='%23ffe9a3'/></svg>">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="head-row">
+    <p class="today-line" id="todayLine">—</p>
+    <button class="conn" id="connBtn" type="button" data-act="conn">
+      <span class="dot" id="connDot"></span><span id="connText">준비 중…</span>
+    </button>
+  </div>
+  <h1 class="site-title">2학기 일정 수첩</h1>
+  <div class="summary" id="summary"></div>
+</header>
+
+<nav class="tabbar" id="tabbar" aria-label="탭"></nav>
+
+<main id="view" class="view"></main>
+
+<div id="gate" class="gate" hidden></div>
+
+<div id="toast" class="toast" hidden></div>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
