@@ -2,7 +2,7 @@
 
 import {
   todayKey, parseKey, longDate, isKey, debounce, byOrder, newId, esc,
-  normHex, clampCount,
+  normHex, bookStats, rangeText,
 } from './util.js';
 import {
   store, subscribe, init, one, put, patch, add, remove, putMany,
@@ -120,6 +120,7 @@ function openForm(ds) {
     date: ds.date || null,
     subject: ds.subject === undefined ? null : ds.subject,
     index: ds.index === undefined ? null : Number(ds.index),
+    book: ds.book || null,
     lockSubject: ds.lock === '1',
   };
   ui.draft = {};
@@ -213,21 +214,75 @@ async function saveForm() {
     } else if (type === 'book') {
       const title = (f.title || '').trim();
       if (!title) return formFail('문제집 이름을 적어 주세요.', f);
-      const total = Math.max(0, Math.round(Number(f.total) || 0));
-      if (total <= 0) return formFail('전체 분량을 1 이상으로 적어 주세요.', f);
+      const startNo = Math.max(0, Math.round(Number(f.startNo) || 0));
+      const endNo = Math.max(0, Math.round(Number(f.endNo) || 0));
+      if (endNo < startNo) return formFail('끝 번호가 시작 번호보다 작습니다.', f);
+      if (endNo <= 0) return formFail('끝 번호를 적어 주세요. (예: 320)', f);
       const base = ui.form.id ? one('books', ui.form.id) : null;
       const obj = {
-        subject: f.subject || '',
+        subject: f.subject || (base ? base.subject : ''),
         order: base ? base.order : nextOrder('books'),
         title,
         publisher: (f.publisher || '').trim(),
-        unit: (f.unit || '').trim() || '문항',
-        total,
-        done: clampCount(f.done, total),
+        unit: (f.unit || '').trim() || '쪽',
+        startNo,
+        endNo,
+        ranges: base && Array.isArray(base.ranges) ? base.ranges : [],
+        links: base && Array.isArray(base.links) ? base.links : [],
         note: (f.note || '').trim(),
       };
       if (ui.form.id) await patch('books', ui.form.id, obj);
       else await add('books', obj, 'book');
+    } else if (type === 'range') {
+      const b = one('books', ui.form.book);
+      if (!b) return formFail('문제집을 찾을 수 없습니다.', f);
+      const from = Math.round(Number(f.from));
+      const to = Math.round(Number(f.to));
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return formFail('숫자를 적어 주세요.', f);
+      if (to < from) return formFail('"어디까지"가 "어디부터"보다 작습니다.', f);
+      const ranges = (Array.isArray(b.ranges) ? b.ranges : []).concat([{
+        from, to, date: isKey(f.date) ? f.date : ui.today,
+      }]);
+      await patch('books', ui.form.book, { ranges });
+    } else if (type === 'plan') {
+      const b = one('books', ui.form.book);
+      if (!b) return formFail('문제집을 찾을 수 없습니다.', f);
+      if (!isKey(f.date)) return formFail('날짜를 골라 주세요.', f);
+      const from = Math.round(Number(f.from));
+      const to = Math.round(Number(f.to));
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return formFail('숫자를 적어 주세요.', f);
+      if (to < from) return formFail('"어디까지"가 "어디부터"보다 작습니다.', f);
+
+      let typeId = f.type || 'todo';
+      if (typeId === NEW_TYPE) {
+        const label = (f.newTypeLabel || '').trim();
+        if (!label) return formFail('새 종류의 이름을 적어 주세요.', f);
+        typeId = await createType(label, f.newTypeColor);
+      }
+
+      const base = ui.form.id ? one('events', ui.form.id) : null;
+      const obj = {
+        date: f.date,
+        type: typeId,
+        title: `${b.title} ${rangeText({ from, to }, b.unit || '쪽')}`,
+        note: base ? (base.note || '') : '',
+        subject: b.subject || '',
+        done: base ? Boolean(base.done) : false,
+        book: ui.form.book,
+        from,
+        to,
+      };
+      if (ui.form.id) await patch('events', ui.form.id, obj);
+      else await add('events', obj, 'ev');
+    } else if (type === 'booklink') {
+      const b = one('books', ui.form.book);
+      if (!b) return formFail('문제집을 찾을 수 없습니다.', f);
+      const title = (f.title || '').trim();
+      const url = (f.url || '').trim();
+      if (!title) return formFail('자료 이름을 적어 주세요.', f);
+      if (!url) return formFail('주소를 적어 주세요.', f);
+      const links = (Array.isArray(b.links) ? b.links : []).concat([{ title, url }]);
+      await patch('books', ui.form.book, { links });
     } else if (type === 'scope') {
       const line = (f.line || '').trim();
       if (!line) return formFail('내용을 적어 주세요.', f);
@@ -285,8 +340,23 @@ async function runDelete(key) {
     if (kind === 'ev') await remove('events', parts[1]);
     else if (kind === 'todo') await remove('todos', parts[1]);
     else if (kind === 'link') await remove('links', parts[1]);
-    else if (kind === 'book') await remove('books', parts[1]);
     else if (kind === 'type') await remove('types', parts[1]);
+    else if (kind === 'book') {
+      // 이 문제집에 걸린 계획 일정도 같이 치운다
+      const linked = Object.entries(store.data.events)
+        .filter(([, ev]) => ev.book === parts[1])
+        .map(([eid]) => eid);
+      for (const eid of linked) await remove('events', eid);
+      await remove('books', parts[1]);
+    } else if (kind === 'range' || kind === 'booklink') {
+      const field = kind === 'range' ? 'ranges' : 'links';
+      const b = one('books', parts[1]);
+      if (b) {
+        const list = (Array.isArray(b[field]) ? b[field] : []).slice();
+        list.splice(Number(parts[2]), 1);
+        await patch('books', parts[1], { [field]: list });
+      }
+    }
     else if (kind === 'subject') {
       await remove('subjects', parts[1]);
       if (ui.tab === parts[1]) { ui.pendingDelete = null; setTab('calendar'); return; }
@@ -382,21 +452,22 @@ async function toggleDoc(coll, id) {
   if (coll === 'todos') changes.doneAt = done ? ui.today : '';
   try {
     await patch(coll, id, changes);
+    // 문제집 계획을 체크하면 그 범위가 "푼 범위"에 들어간다 (풀면 다시 빠진다)
+    if (coll === 'events' && cur.book) await syncPlanRange({ id, ...cur }, done);
   } catch (e) {
     toast(`저장 실패: ${errMsg(e)}`, true);
   }
 }
 
-async function setBookDone(id, value) {
-  const b = one('books', id);
+async function syncPlanRange(ev, done) {
+  const b = one('books', ev.book);
   if (!b) return;
-  const next = clampCount(value, b.total);
-  if (next === (Number(b.done) || 0)) return;
-  try {
-    await patch('books', id, { done: next });
-  } catch (e) {
-    toast(`저장 실패: ${errMsg(e)}`, true);
-  }
+  const list = Array.isArray(b.ranges) ? b.ranges : [];
+  const ranges = done
+    ? list.concat([{ from: ev.from, to: ev.to, date: ui.today, plan: ev.id }])
+    : list.filter((r) => r.plan !== ev.id);
+  if (done && list.some((r) => r.plan === ev.id)) return;
+  await patch('books', ev.book, { ranges });
 }
 
 /* ===================== 백업 ===================== */
@@ -482,11 +553,6 @@ const handlers = {
   'link-move': (el) => { moveOrdered('links', el.dataset.id, Number(el.dataset.dir)); },
   'type-move': (el) => { moveOrdered('types', el.dataset.id, Number(el.dataset.dir)); },
   'book-move': (el) => { moveBook(el.dataset.id, Number(el.dataset.dir)); },
-  'book-add': (el) => {
-    const b = one('books', el.dataset.id);
-    if (!b) return;
-    setBookDone(el.dataset.id, (Number(b.done) || 0) + Number(el.dataset.n));
-  },
   export: () => doExport(),
   import: () => elImport.click(),
   login: async () => {
@@ -542,12 +608,6 @@ document.addEventListener('change', async (e) => {
     return;
   }
 
-  // 문제집 진행량 직접 입력
-  if (el.dataset.book) {
-    setBookDone(el.dataset.book, el.value);
-    return;
-  }
-
   if (el.dataset.set) {
     try {
       await patch('settings', 'main', { [el.dataset.set]: el.value });
@@ -564,7 +624,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   const el = e.target;
   if (!el.dataset) return;
-  if (el.dataset.book) { el.blur(); return; }
   if (!el.dataset.k) return;
   if (el.tagName === 'TEXTAREA') return;
   e.preventDefault();
@@ -585,7 +644,6 @@ function snapshotFocus() {
   let sel = null;
   if (d.k) sel = `.form [data-k="${d.k}"]`;
   else if (d.memo) sel = `[data-memo="${CSS.escape(d.memo)}"]`;
-  else if (d.book) sel = `[data-book="${CSS.escape(d.book)}"]`;
   else if (d.set) sel = `[data-set="${d.set}"]`;
   if (!sel) return null;
   let s = null;

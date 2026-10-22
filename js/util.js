@@ -141,6 +141,80 @@ export function clampCount(value, total) {
   return t > 0 ? Math.min(n, t) : n;
 }
 
+/* ===================== 문제집 범위 ===================== */
+// 문제집은 "몇 개 풀었다"가 아니라 "어디부터 어디까지 풀었다"로 기록합니다.
+// 구간이 겹치거나 붙어 있으면 하나로 합쳐서 세기 때문에
+// 같은 쪽을 두 번 적어도 진도가 부풀지 않습니다.
+
+export function mergeRanges(ranges) {
+  const list = (ranges || [])
+    .map((r) => ({
+      from: Math.round(Number(r.from)),
+      to: Math.round(Number(r.to)),
+      date: r.date || '',
+    }))
+    .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to))
+    .map((r) => (r.from <= r.to ? r : { ...r, from: r.to, to: r.from }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+
+  const out = [];
+  list.forEach((r) => {
+    const last = out[out.length - 1];
+    if (last && r.from <= last.to + 1) last.to = Math.max(last.to, r.to);
+    else out.push({ from: r.from, to: r.to });
+  });
+  return out;
+}
+
+export function clipRanges(ranges, min, max) {
+  return mergeRanges(ranges)
+    .map((r) => ({ from: Math.max(r.from, min), to: Math.min(r.to, max) }))
+    .filter((r) => r.to >= r.from);
+}
+
+export function rangeLength(r) {
+  return Math.abs(Math.round(Number(r.to)) - Math.round(Number(r.from))) + 1;
+}
+
+// 문제집 하나의 진도 요약
+export function bookStats(b) {
+  const start = Math.round(Number(b.startNo)) || 1;
+  const endRaw = Math.round(Number(b.endNo)) || 0;
+  const end = endRaw >= start ? endRaw : start - 1;
+  const total = end >= start ? end - start + 1 : 0;
+  const covered = total > 0 ? clipRanges(b.ranges || [], start, end) : [];
+  const done = covered.reduce((n, r) => n + (r.to - r.from + 1), 0);
+  return {
+    start,
+    end,
+    total,
+    done,
+    left: Math.max(0, total - done),
+    percent: pct(done, total),
+    covered,
+    full: total > 0 && done >= total,
+  };
+}
+
+// 아직 안 푼 구간 (계획 세울 때 "여기부터" 제안용)
+export function missingRanges(b) {
+  const { start, end, covered, total } = bookStats(b);
+  if (total <= 0) return [];
+  const out = [];
+  let cursor = start;
+  covered.forEach((r) => {
+    if (r.from > cursor) out.push({ from: cursor, to: r.from - 1 });
+    cursor = Math.max(cursor, r.to + 1);
+  });
+  if (cursor <= end) out.push({ from: cursor, to: end });
+  return out;
+}
+
+export function rangeText(r, unit) {
+  const u = unit || '쪽';
+  return `${r.from}~${r.to}${u}`;
+}
+
 /* ===================== 기타 ===================== */
 
 export function esc(s) {

@@ -217,9 +217,35 @@ async function ensureDefaults() {
   }
 }
 
+// 문제집을 "푼 개수"에서 "푼 범위"로 한 번만 옮긴다.
+// 예전 기록(done 45 / total 300)은 1~45 을 푼 것으로 본다.
+async function migrateBooks() {
+  const writes = [];
+  Object.entries(store.data.books || {}).forEach(([id, b]) => {
+    if (!b || b.startNo !== undefined) return;
+    const total = Math.round(Number(b.total)) || 0;
+    const done = Math.round(Number(b.done)) || 0;
+    const next = { ...b };
+    delete next.total;
+    delete next.done;
+    next.startNo = 1;
+    next.endNo = total;
+    next.ranges = (done > 0 && total > 0) ? [{ from: 1, to: Math.min(done, total), date: '' }] : [];
+    next.links = Array.isArray(b.links) ? b.links : [];
+    writes.push(['books', id, next]);
+  });
+  if (!writes.length) return;
+  try {
+    await putMany(writes);
+  } catch (err) {
+    console.error('문제집 기록을 옮기지 못했습니다', err);
+  }
+}
+
 async function prepare() {
   await seedIfEmpty();
   await ensureDefaults();
+  await migrateBooks();
 }
 
 /* ---------- 읽기 ---------- */

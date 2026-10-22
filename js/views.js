@@ -4,6 +4,7 @@ import {
   esc, safeUrl, todayKey, addDays, pad, dday, daysBetween,
   longDate, midDate, shortDate, byOrder, sortEvents,
   typeOf, rgba, lighten, textOn, pct, normHex,
+  bookStats, missingRanges, rangeLength, rangeText,
 } from './util.js';
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
@@ -208,9 +209,9 @@ function bookForm(ui, book, subjectId) {
   const d = {
     title: val(ui, 'title', book ? book.title : ''),
     publisher: val(ui, 'publisher', book ? (book.publisher || '') : ''),
-    total: val(ui, 'total', book ? book.total : ''),
-    unit: val(ui, 'unit', book ? (book.unit || '문항') : '문항'),
-    done: val(ui, 'done', book ? book.done : 0),
+    unit: val(ui, 'unit', book ? (book.unit || '쪽') : '쪽'),
+    startNo: val(ui, 'startNo', book ? book.startNo : 1),
+    endNo: val(ui, 'endNo', book ? book.endNo : ''),
     note: val(ui, 'note', book ? (book.note || '') : ''),
   };
   return `<div class="form">
@@ -221,12 +222,81 @@ function bookForm(ui, book, subjectId) {
       <label>출판사<input type="text" data-k="publisher" value="${esc(d.publisher)}" placeholder="비워도 됩니다"></label>
     </div>
     <div class="f-row">
-      <label>전체 분량<input type="number" data-k="total" value="${esc(d.total)}" min="1" placeholder="예: 420"></label>
-      <label class="narrow">단위<input type="text" data-k="unit" value="${esc(d.unit)}" placeholder="문항"></label>
-      <label class="narrow">푼 양<input type="number" data-k="done" value="${esc(d.done)}" min="0"></label>
+      <label class="narrow">단위<input type="text" data-k="unit" value="${esc(d.unit)}" placeholder="쪽"></label>
+      <label class="narrow">시작<input type="number" data-k="startNo" value="${esc(d.startNo)}" min="0" placeholder="1"></label>
+      <label class="narrow">끝<input type="number" data-k="endNo" value="${esc(d.endNo)}" min="0" placeholder="320"></label>
+    </div>
+    <p class="muted" style="margin:-2px 0 8px">예) 1쪽부터 320쪽까지면 시작 1, 끝 320. 문항으로 세고 싶으면 단위를 "문항"으로.</p>
+    <div class="f-row">
+      <label>메모<textarea data-k="note" rows="2" placeholder="2회독 여부, 오답 정리 방법 등">${esc(d.note)}</textarea></label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+    </div>
+  </div>`;
+}
+
+// 푼 범위 입력
+function rangeForm(ui, b, stats) {
+  const gap = missingRanges(b)[0];
+  const d = {
+    from: val(ui, 'from', gap ? gap.from : stats.start),
+    to: val(ui, 'to', ''),
+    date: val(ui, 'date', ui.today),
+  };
+  return `<div class="form">
+    ${errLine(ui)}
+    <div class="f-row">
+      <label class="narrow">어디부터<input type="number" data-k="from" value="${esc(d.from)}" min="0"></label>
+      <label class="narrow">어디까지<input type="number" data-k="to" value="${esc(d.to)}" min="0"></label>
+      <label>푼 날짜<input type="date" data-k="date" value="${esc(d.date)}"></label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+    </div>
+  </div>`;
+}
+
+// 계획(언제까지 어디부터 어디까지) — 저장하면 일정표에도 올라갑니다
+function planForm(data, ui, b, ev, stats) {
+  const gap = missingRanges(b)[0];
+  const d = {
+    date: val(ui, 'date', ev ? ev.date : addDays(ui.today, 1)),
+    from: val(ui, 'from', ev ? ev.from : (gap ? gap.from : stats.start)),
+    to: val(ui, 'to', ev ? ev.to : ''),
+    type: val(ui, 'type', ev ? ev.type : 'todo'),
+  };
+  return `<div class="form">
+    ${errLine(ui)}
+    <div class="f-row">
+      <label>언제까지<input type="date" data-k="date" value="${esc(d.date)}"></label>
+      <label class="narrow">어디부터<input type="number" data-k="from" value="${esc(d.from)}" min="0"></label>
+      <label class="narrow">어디까지<input type="number" data-k="to" value="${esc(d.to)}" min="0"></label>
     </div>
     <div class="f-row">
-      <label>메모<textarea data-k="note" rows="2" placeholder="범위, 2회독 여부 등">${esc(d.note)}</textarea></label>
+      <label>일정표에 표시할 종류<select data-k="type">${typeOptions(data, d.type)}</select></label>
+    </div>
+    ${d.type === NEW_TYPE ? `<div class="f-row sub-row">
+      <label>새 종류 이름<input type="text" data-k="newTypeLabel" value="${esc(val(ui, 'newTypeLabel', ''))}" placeholder="예: 문제집"></label>
+      <label class="narrow">색<input type="color" data-k="newTypeColor" value="${esc(val(ui, 'newTypeColor', '#2f5bd7'))}"></label>
+    </div>` : ''}
+    <p class="muted" style="margin:-2px 0 8px">저장하면 달력과 오늘 탭에 나옵니다. 체크하면 그 범위가 "푼 범위"에 자동으로 들어갑니다.</p>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+    </div>
+  </div>`;
+}
+
+// 문제집 자료 링크 (PDF·스캔본을 드라이브에 올려 두고 주소를 붙입니다)
+function bookLinkForm(ui, b) {
+  return `<div class="form">
+    ${errLine(ui)}
+    <div class="f-row">
+      <label>자료 이름<input type="text" data-k="title" value="${esc(val(ui, 'title', ''))}" placeholder="예: 해설지 PDF"></label>
+      <label>주소<input type="url" data-k="url" value="${esc(val(ui, 'url', ''))}" placeholder="https://drive.google.com/…"></label>
     </div>
     <div class="btn-row">
       <button type="button" class="btn primary" data-act="form-save">저장</button>
@@ -238,19 +308,67 @@ function bookForm(ui, book, subjectId) {
 function bookCard(data, ui, b, index, count) {
   const key = `book:${b.id}`;
   if (ui.form && ui.form.type === 'book' && ui.form.id === b.id) return bookForm(ui, b, b.subject);
-  if (ui.pendingDelete === key) return confirmRow(`"${b.title}" 문제집을 정말 삭제할까요?`, key);
+  if (ui.pendingDelete === key) return confirmRow(`"${b.title}" 문제집을 정말 삭제할까요? 연결된 계획 일정도 같이 지워집니다.`, key);
 
-  const total = Number(b.total) || 0;
-  const done = Number(b.done) || 0;
-  const p = pct(done, total);
-  const unit = b.unit || '문항';
-  const full = total > 0 && done >= total;
+  const unit = b.unit || '쪽';
+  const st = bookStats(b);
+  const raw = Array.isArray(b.ranges) ? b.ranges : [];
+  const links = Array.isArray(b.links) ? b.links : [];
 
-  return `<div class="book${full ? ' is-full' : ''}">
+  const addingRange = ui.form && ui.form.type === 'range' && ui.form.book === b.id;
+  const addingPlan = ui.form && ui.form.type === 'plan' && ui.form.book === b.id && !ui.form.id;
+  const addingLink = ui.form && ui.form.type === 'booklink' && ui.form.book === b.id;
+
+  /* 푼 범위 목록 (적은 그대로, 지울 수 있게) */
+  const rangeRows = raw.map((r, i) => {
+    const rk = `range:${b.id}:${i}`;
+    if (ui.pendingDelete === rk) return `<li class="block">${confirmRow(`${rangeText(r, unit)} 기록을 지울까요?`, rk)}</li>`;
+    return `<li>
+      <span class="rg-main">${esc(rangeText(r, unit))}</span>
+      <span class="rg-sub">${rangeLength(r)}${esc(unit)}${r.date ? ` · ${esc(shortDate(r.date))}` : ''}</span>
+      <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(rk)}" aria-label="삭제" title="삭제">🗑</button>
+    </li>`;
+  }).join('');
+
+  /* 계획 = 이 문제집에 연결된 일정 */
+  const plans = Object.entries(data.events)
+    .map(([eid, ev]) => ({ id: eid, ...ev }))
+    .filter((ev) => ev.book === b.id)
+    .sort((a, b2) => String(a.date).localeCompare(String(b2.date)));
+
+  const planRows = plans.map((ev) => {
+    const ek = `ev:${ev.id}`;
+    if (ui.form && ui.form.type === 'plan' && ui.form.id === ev.id) return planForm(data, ui, b, ev, st);
+    if (ui.pendingDelete === ek) return confirmRow(`"${ev.title}" 계획을 정말 삭제할까요?`, ek);
+    const t = typeOf(data, ev.type);
+    return `<div class="item${ev.done ? ' is-done' : ''}" style="border-left-color:${t.color}">
+      <button type="button" class="check" data-act="ev-toggle" data-id="${esc(ev.id)}"
+        aria-pressed="${ev.done ? 'true' : 'false'}" aria-label="완료 표시">${ev.done ? '✓' : ''}</button>
+      <div class="item-main">
+        <div class="item-title">${esc(rangeText({ from: ev.from, to: ev.to }, unit))} <span class="muted">(${rangeLength({ from: ev.from, to: ev.to })}${esc(unit)})</span></div>
+        <div class="item-meta">${typeBadge(t)}${ddayBadge(ev.date, ui.today)}<span>${esc(shortDate(ev.date))}까지</span></div>
+      </div>
+      <div class="item-acts">
+        <button type="button" class="btn icon" data-act="form-open" data-type="plan" data-id="${esc(ev.id)}" data-book="${esc(b.id)}" aria-label="수정" title="수정">✏️</button>
+        <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(ek)}" aria-label="삭제" title="삭제">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const linkChips = links.map((l, i) => {
+    const lk = `booklink:${b.id}:${i}`;
+    if (ui.pendingDelete === lk) return confirmRow(`"${l.title}" 자료를 지울까요?`, lk);
+    return `<span class="file-chip">
+      <a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener noreferrer">📄 ${esc(l.title)}</a>
+      <button type="button" class="chip-x" data-act="del-ask" data-key="${esc(lk)}" aria-label="삭제" title="삭제">✕</button>
+    </span>`;
+  }).join('');
+
+  return `<div class="book${st.full ? ' is-full' : ''}">
     <div class="book-head">
       <div class="book-main">
         <div class="book-title">${esc(b.title)}</div>
-        ${b.publisher ? `<div class="book-sub">${esc(b.publisher)}</div>` : ''}
+        <div class="book-sub">${b.publisher ? `${esc(b.publisher)} · ` : ''}${st.total > 0 ? `${st.start}~${st.end}${esc(unit)}` : '전체 분량 미정'}</div>
       </div>
       <span class="item-acts">
         <button type="button" class="btn icon" data-act="book-move" data-id="${esc(b.id)}" data-dir="-1" aria-label="위로" title="위로"${index === 0 ? ' disabled' : ''}>↑</button>
@@ -260,23 +378,43 @@ function bookCard(data, ui, b, index, count) {
       </span>
     </div>
 
-    ${progressBar(done, total)}
+    ${progressBar(st.done, st.total)}
 
     <div class="book-row">
-      <span class="book-pct">${p}%</span>
-      <span class="book-count">
-        <input type="number" class="book-num" data-book="${esc(b.id)}" value="${done}" min="0"${total ? ` max="${total}"` : ''} aria-label="푼 양">
-        <span class="book-of">/ ${total || '—'} ${esc(unit)}</span>
-      </span>
-      <span class="btn-row book-quick">
-        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="-1">−1</button>
-        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="1">+1</button>
-        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="5">+5</button>
-        <button type="button" class="btn tiny" data-act="book-add" data-id="${esc(b.id)}" data-n="10">+10</button>
-      </span>
+      <span class="book-pct">${st.percent}%</span>
+      <span class="book-of">${st.done} / ${st.total || '—'}${esc(unit)}${st.total ? ` · 남은 ${st.left}${esc(unit)}` : ''}</span>
     </div>
 
-    ${full ? '<div class="book-full">다 풀었습니다 🎉</div>' : ''}
+    ${st.full ? '<div class="book-full">다 풀었습니다 🎉</div>' : ''}
+
+    <div class="book-sec">
+      <div class="book-sec-head">
+        <h4>푼 범위<span class="count">${raw.length}건</span></h4>
+        ${addingRange ? '' : `<button type="button" class="btn tiny" data-act="form-open" data-type="range" data-book="${esc(b.id)}">+ 범위 추가</button>`}
+      </div>
+      ${addingRange ? rangeForm(ui, b, st) : ''}
+      ${raw.length ? `<ul class="range-list">${rangeRows}</ul>` : '<p class="empty tiny">아직 기록이 없습니다.</p>'}
+      ${raw.length > 1 ? '<p class="muted tiny">겹치는 부분은 한 번만 셉니다.</p>' : ''}
+    </div>
+
+    <div class="book-sec">
+      <div class="book-sec-head">
+        <h4>계획<span class="count">${plans.filter((p) => !p.done).length}개 남음</span></h4>
+        ${addingPlan ? '' : `<button type="button" class="btn tiny" data-act="form-open" data-type="plan" data-book="${esc(b.id)}">+ 계획 추가</button>`}
+      </div>
+      ${addingPlan ? planForm(data, ui, b, null, st) : ''}
+      ${plans.length ? planRows : '<p class="empty tiny">세운 계획이 없습니다. 추가하면 달력에도 나옵니다.</p>'}
+    </div>
+
+    <div class="book-sec">
+      <div class="book-sec-head">
+        <h4>자료<span class="count">${links.length}개</span></h4>
+        ${addingLink ? '' : `<button type="button" class="btn tiny" data-act="form-open" data-type="booklink" data-book="${esc(b.id)}">+ 자료 링크</button>`}
+      </div>
+      ${addingLink ? bookLinkForm(ui, b) : ''}
+      ${links.length ? `<div class="file-chips">${linkChips}</div>` : '<p class="empty tiny">PDF·스캔본을 드라이브에 올리고 주소를 붙여 두세요.</p>'}
+    </div>
+
     ${b.note ? `<div class="item-note">${esc(b.note)}</div>` : ''}
   </div>`;
 }
@@ -497,8 +635,9 @@ export function renderSubject(data, ui, id) {
   /* --- 문제집 --- */
   const myBooks = byOrder(data.books).filter((b) => b.subject === id);
   const addingBook = ui.form && ui.form.type === 'book' && !ui.form.id && ui.form.subject === id;
-  const sumTotal = myBooks.reduce((n, b) => n + (Number(b.total) || 0), 0);
-  const sumDone = myBooks.reduce((n, b) => n + Math.min(Number(b.done) || 0, Number(b.total) || Infinity), 0);
+  const sums = myBooks.map((b) => bookStats(b));
+  const sumTotal = sums.reduce((n, s) => n + s.total, 0);
+  const sumDone = sums.reduce((n, s) => n + s.done, 0);
   const booksCount = myBooks.length > 1 && sumTotal > 0
     ? `전체 ${sumDone} / ${sumTotal} (${pct(sumDone, sumTotal)}%)`
     : `${myBooks.length}권`;
