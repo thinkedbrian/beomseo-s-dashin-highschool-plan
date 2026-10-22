@@ -70,6 +70,8 @@ function errMsg(e) {
   if (e.code === 'auth/popup-blocked') return '팝업이 막혔습니다. 팝업을 허용해 주세요';
   if (e.code === 'auth/popup-closed-by-user') return '로그인 창이 닫혔습니다';
   if (e.code === 'auth/unauthorized-domain') return '이 주소가 Firebase 승인된 도메인에 없습니다';
+  if (e.code === 'auth/operation-not-allowed') return 'Google 로그인이 꺼져 있습니다 (Authentication → Sign-in method)';
+  if (e.code === 'auth/network-request-failed') return '네트워크 연결을 확인해 주세요';
   return e.message || String(e);
 }
 
