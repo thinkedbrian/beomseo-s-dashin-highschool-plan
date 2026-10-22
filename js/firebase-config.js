@@ -18,7 +18,10 @@ export const firebaseConfig = {
   measurementId: 'G-N0L9GPBQ3C',
 };
 
-// 내 계정만 쓰게 하고 싶으면 내 Google 계정의 UID 를 적어 주세요.
+// 이 UID 의 계정만 쓸 수 있습니다. 다른 Google 계정으로 로그인하면
+// "허용되지 않은 계정" 화면이 뜹니다.
 // (Firebase 콘솔 → Authentication → Users 의 "사용자 UID")
-// 비워 두면 로그인한 사람은 각자 자기 데이터만 보게 됩니다.
-export const OWNER_UID = '';
+//
+// 이건 화면을 막는 용도고, 진짜 자물쇠는 firestore.rules 쪽입니다.
+// 둘 중 하나만 바꾸면 반쪽짜리가 되니 항상 같이 고치세요.
+export const OWNER_UID = 'TXh4nG6qenUwEwlWrVJlshzbBqG3';

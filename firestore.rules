@@ -1,13 +1,16 @@
 rules_version = '2';
 
 // Firebase 콘솔 → Firestore Database → 규칙 탭에 이 내용을 그대로 붙여넣고 "게시"를 누르세요.
+// 저장소에 올리는 것만으로는 적용되지 않습니다. 콘솔에서 게시해야 합니다.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 로그인한 사람은 자기 폴더(users/자기UID) 안만 읽고 쓸 수 있습니다.
-    // 다른 사람 폴더는 물론, 로그인하지 않은 사람은 아무것도 읽거나 쓸 수 없습니다.
+    // 소유자(아래 UID) 본인만, 자기 폴더 안만 읽고 쓸 수 있습니다.
+    // 로그인하지 않은 사람도, 다른 Google 계정으로 로그인한 사람도 아무것도 못 합니다.
     match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && uid == 'TXh4nG6qenUwEwlWrVJlshzbBqG3';
     }
 
     // 그 밖의 모든 경로는 금지
@@ -17,14 +20,14 @@ service cloud.firestore {
   }
 }
 
-// ── 나만 쓰게 완전히 잠그고 싶다면 ──────────────────────────────
-// 위 users 규칙을 아래로 바꾸세요. 'XXXX' 자리에는
-// Firebase 콘솔 → Authentication → Users 에 보이는 내 "사용자 UID"를 넣습니다.
+// ── 계정을 바꾸거나 잠금을 풀고 싶을 때 ──────────────────────────
 //
-//     match /users/{uid}/{document=**} {
-//       allow read, write: if request.auth != null
-//                          && request.auth.uid == uid
-//                          && uid == 'XXXX';
-//     }
+// 다른 Google 계정으로 옮기려면: Authentication → Users 에서 새 계정의
+// UID 를 확인해 위의 'TXh4...' 자리를 바꾸고 다시 게시하세요.
+// js/firebase-config.js 의 OWNER_UID 도 같이 바꿔야 합니다.
 //
-// 이렇게 하면 다른 Google 계정으로 로그인해도 아무것도 못 합니다.
+// 잠금을 풀려면(로그인한 사람은 누구나 자기 수첩을 쓰게):
+// 위 조건에서 마지막 uid == '...' 줄을 지우고 게시하세요.
+//
+// UID 를 잘못 넣어 본인도 못 들어가게 됐다면, 콘솔의 규칙 탭에서
+// 언제든 고쳐 다시 게시하면 됩니다. 규칙은 콘솔이 항상 우선입니다.
