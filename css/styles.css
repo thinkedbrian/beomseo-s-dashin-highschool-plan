@@ -64,6 +64,9 @@
 
 * { box-sizing: border-box; }
 
+/* hidden 속성이 아래의 display 선언에 덮이지 않도록 (예: .gate 의 display:grid) */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
