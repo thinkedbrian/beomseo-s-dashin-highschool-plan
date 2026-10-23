@@ -94,6 +94,7 @@ function buildSeed() {
     links,
     types,
     books: {},
+    notes: {},
     settings: { main: { examStart: '2026-12-07', examEnd: '2026-12-10' } },
   };
 }

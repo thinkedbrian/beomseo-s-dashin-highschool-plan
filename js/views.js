@@ -1,7 +1,7 @@
 // 화면 그리기 — 순수 함수로 HTML 문자열을 만든다 (상태 변경은 app.js)
 
 import {
-  esc, safeUrl, todayKey, addDays, pad, dday, daysBetween,
+  esc, safeUrl, todayKey, toKey, addDays, pad, dday, daysBetween,
   longDate, midDate, shortDate, byOrder, sortEvents,
   typeOf, rgba, lighten, textOn, pct, normHex,
   bookStats, missingRanges, rangeLength, rangeText,
@@ -786,6 +786,105 @@ function linkForm(ui, l) {
       <button type="button" class="btn" data-act="form-cancel">취소</button>
     </div>
   </div>`;
+}
+
+/* ===================== 메모 탭 ===================== */
+// iOS 메모장처럼 — 첫 줄이 제목이 되고, 목록에는 제목·시각·미리보기가 보입니다.
+
+export function noteTitle(body) {
+  const line = String(body || '').split('\n').find((l) => l.trim());
+  return line ? line.trim().slice(0, 60) : '새 메모';
+}
+
+function notePreview(body) {
+  const lines = String(body || '').split('\n');
+  const i = lines.findIndex((l) => l.trim());
+  if (i < 0) return '추가 텍스트 없음';
+  const rest = lines.slice(i + 1).join(' ').replace(/\s+/g, ' ').trim();
+  return rest ? rest.slice(0, 90) : '추가 텍스트 없음';
+}
+
+function noteStamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  if (toKey(d) === todayKey()) {
+    const h = d.getHours();
+    return `${h < 12 ? '오전' : '오후'} ${((h + 11) % 12) + 1}:${pad(d.getMinutes())}`;
+  }
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+function noteRow(ui, n) {
+  const key = `note:${n.id}`;
+  if (ui.pendingDelete === key) return confirmRow(`"${noteTitle(n.body)}" 메모를 정말 삭제할까요?`, key);
+  return `<div class="note-item">
+    <button type="button" class="note-row" data-act="note-open" data-id="${esc(n.id)}">
+      <span class="note-title">${n.pinned ? '<span class="note-pin-mark" aria-label="고정됨">📌</span> ' : ''}${esc(noteTitle(n.body))}</span>
+      <span class="note-meta"><span class="note-when">${esc(noteStamp(n.updatedAt))}</span><span class="note-prev">${esc(notePreview(n.body))}</span></span>
+    </button>
+    <span class="item-acts">
+      <button type="button" class="btn icon" data-act="note-pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '고정 해제' : '위에 고정'}" title="${n.pinned ? '고정 해제' : '위에 고정'}">${n.pinned ? '📌' : '📍'}</button>
+      <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+    </span>
+  </div>`;
+}
+
+function noteEditor(ui, n) {
+  const key = `note:${n.id}`;
+  const state = ui.memoState[key] || '';
+  return `<section class="panel">
+    <div class="panel-head">
+      <button type="button" class="btn" data-act="note-back">‹ 메모 목록</button>
+      <span class="save-state ${state === '저장됨' ? 'ok' : (state && state !== '저장 중…' ? 'err' : '')}">${esc(state)}</span>
+      <span class="item-acts">
+        <button type="button" class="btn icon" data-act="note-pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '고정 해제' : '위에 고정'}" title="${n.pinned ? '고정 해제' : '위에 고정'}">${n.pinned ? '📌' : '📍'}</button>
+        <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
+      </span>
+    </div>
+    ${ui.pendingDelete === key ? confirmRow('이 메모를 정말 삭제할까요?', key) : ''}
+    <p class="note-stamp">${esc(noteStamp(n.updatedAt))}</p>
+    <textarea class="note-editor" data-note="${esc(n.id)}" placeholder="첫 줄이 제목이 됩니다">${esc(val(ui, `note:${n.id}`, n.body || ''))}</textarea>
+    <p class="muted" style="margin:6px 0 0">입력을 멈추면 자동으로 저장됩니다. 비워 두고 나가면 메모가 사라집니다.</p>
+  </section>`;
+}
+
+export function renderNotes(data, ui) {
+  const all = Object.entries(data.notes || {}).map(([id, n]) => ({ id, ...n }));
+
+  const open = ui.noteId && all.find((n) => n.id === ui.noteId);
+  if (open) return noteEditor(ui, open);
+
+  const q = (ui.noteQuery || '').trim().toLowerCase();
+  const matched = q
+    ? all.filter((n) => String(n.body || '').toLowerCase().includes(q))
+    : all;
+  const sorted = matched.sort((a, b) => (
+    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+    || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+  ));
+
+  const pinned = sorted.filter((n) => n.pinned);
+  const rest = sorted.filter((n) => !n.pinned);
+
+  let body;
+  if (!all.length) {
+    body = '<p class="empty">아직 메모가 없습니다. 오른쪽 위 버튼으로 하나 만들어 보세요.</p>';
+  } else if (!sorted.length) {
+    body = `<p class="empty">"${esc(ui.noteQuery)}" 와(과) 맞는 메모가 없습니다.</p>`;
+  } else {
+    body = (pinned.length ? `<h3 class="subhead">고정됨</h3>${pinned.map((n) => noteRow(ui, n)).join('')}` : '')
+      + (rest.length ? `${pinned.length ? '<h3 class="subhead">메모</h3>' : ''}${rest.map((n) => noteRow(ui, n)).join('')}` : '');
+  }
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">메모<span class="count">${all.length}개</span></h2>
+      <button type="button" class="btn primary" data-act="note-new">✏️ 새 메모</button>
+    </div>
+    ${all.length ? `<input type="search" class="note-search" data-note-q value="${esc(ui.noteQuery || '')}" placeholder="메모 검색" aria-label="메모 검색">` : ''}
+    ${body}
+  </section>`;
 }
 
 /* ===================== 설정 탭 ===================== */

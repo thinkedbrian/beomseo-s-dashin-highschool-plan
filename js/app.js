@@ -10,7 +10,7 @@ import {
 } from './store.js';
 import {
   renderCalendar, renderToday, renderSubject, renderLinks, renderSettings,
-  renderSummary, renderGate, NEW_TYPE,
+  renderNotes, renderSummary, renderGate, NEW_TYPE,
 } from './views.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -31,6 +31,7 @@ const FIXED_BEFORE = [
 ];
 const FIXED_AFTER = [
   { id: 'links', label: '바로가기' },
+  { id: 'notes', label: '메모' },
   { id: 'settings', label: '⚙ 설정' },
 ];
 
@@ -50,6 +51,8 @@ const ui = {
   pendingDelete: null,
   pendingImport: null,
   memoState: {},
+  noteId: null,
+  noteQuery: '',
 };
 
 /* ===================== 토스트 ===================== */
@@ -96,6 +99,7 @@ function setTab(id) {
   const next = validTab(id);
   closeForm();
   ui.pendingDelete = null;
+  if (next !== 'notes') closeNote();
   if (next === ui.tab && tabFromHash() === next) { render(); return; }
   ui.tab = next;
   const want = `#${next}`;
@@ -106,6 +110,7 @@ function setTab(id) {
 window.addEventListener('hashchange', () => {
   const next = tabFromHash();
   if (next !== ui.tab) { closeForm(); ui.pendingDelete = null; }
+  if (next !== 'notes') closeNote();
   ui.tab = next;
   render();
   window.scrollTo({ top: 0 });
@@ -342,6 +347,10 @@ async function runDelete(key) {
     else if (kind === 'todo') await remove('todos', parts[1]);
     else if (kind === 'link') await remove('links', parts[1]);
     else if (kind === 'type') await remove('types', parts[1]);
+    else if (kind === 'note') {
+      await remove('notes', parts[1]);
+      if (ui.noteId === parts[1]) ui.noteId = null;
+    }
     else if (kind === 'book') {
       // 이 문제집에 걸린 계획 일정도 같이 치운다
       const linked = Object.entries(store.data.events)
@@ -499,7 +508,87 @@ elImport.addEventListener('change', async () => {
   }
 });
 
-/* ===================== 메모 자동 저장 ===================== */
+/* ===================== 메모장 (notes) ===================== */
+
+const noteSavers = new Map();
+
+function noteSaver(id) {
+  if (!noteSavers.has(id)) {
+    noteSavers.set(id, debounce(async (value) => {
+      if (!one('notes', id)) return; // 그새 지워졌으면 되살리지 않는다
+      const key = `note:${id}`;
+      ui.memoState[key] = '저장 중…';
+      render();
+      try {
+        await patch('notes', id, { body: value, updatedAt: new Date().toISOString() });
+        ui.memoState[key] = '저장됨';
+        render();
+        setTimeout(() => {
+          if (ui.memoState[key] === '저장됨') { ui.memoState[key] = ''; render(); }
+        }, 2000);
+      } catch (e) {
+        ui.memoState[key] = '저장 실패';
+        render();
+        toast(`메모 저장 실패: ${errMsg(e)}`, true);
+      }
+    }, 600));
+  }
+  return noteSavers.get(id);
+}
+
+// 편집기를 닫을 때 내용이 비어 있으면 메모를 남기지 않는다 (iOS 메모장과 같게)
+async function closeNote() {
+  const id = ui.noteId;
+  ui.noteId = null;
+  if (!id) return;
+  delete ui.draft[`note:${id}`];
+  delete ui.memoState[`note:${id}`];
+  const n = one('notes', id);
+  if (n && !String(n.body || '').trim()) {
+    try { await remove('notes', id); } catch (e) { /* 그냥 둔다 */ }
+  }
+}
+
+async function newNote() {
+  if (!canEdit()) { toast('로그인한 뒤에 쓸 수 있습니다.', true); return; }
+  const now = new Date().toISOString();
+  const id = newId('note');
+  try {
+    await put('notes', id, { body: '', createdAt: now, updatedAt: now, pinned: false });
+    ui.noteId = id;
+    ui.pendingDelete = null;
+    ui.noteQuery = '';
+    render();
+    const ta = elView.querySelector('[data-note]');
+    if (ta) ta.focus();
+  } catch (e) {
+    toast(`메모를 만들지 못했습니다: ${errMsg(e)}`, true);
+  }
+}
+
+function openNote(id) {
+  ui.noteId = id;
+  ui.pendingDelete = null;
+  render();
+  const ta = elView.querySelector('[data-note]');
+  if (ta) {
+    ta.focus();
+    const end = ta.value.length;
+    try { ta.setSelectionRange(end, end); } catch (_) { /* noop */ }
+  }
+}
+
+async function toggleNotePin(id) {
+  const n = one('notes', id);
+  if (!n) return;
+  try {
+    await patch('notes', id, { pinned: !n.pinned });
+  } catch (e) {
+    toast(`저장 실패: ${errMsg(e)}`, true);
+  }
+}
+
+/* ===================== 과목 메모 자동 저장 ===================== */
 
 const memoSavers = new Map();
 
@@ -554,6 +643,10 @@ const handlers = {
   'link-move': (el) => { moveOrdered('links', el.dataset.id, Number(el.dataset.dir)); },
   'type-move': (el) => { moveOrdered('types', el.dataset.id, Number(el.dataset.dir)); },
   'book-move': (el) => { moveBook(el.dataset.id, Number(el.dataset.dir)); },
+  'note-new': () => { newNote(); },
+  'note-open': (el) => { openNote(el.dataset.id); },
+  'note-back': () => { closeNote().then(render); },
+  'note-pin': (el) => { toggleNotePin(el.dataset.id); },
   export: () => doExport(),
   import: () => elImport.click(),
   login: async () => {
@@ -590,12 +683,21 @@ document.addEventListener('input', (e) => {
     const id = el.dataset.memo;
     ui.draft[`memo:${id}`] = el.value;
     memoSaver(id)(el.value);
+  } else if (el.dataset && el.dataset.note) {
+    const id = el.dataset.note;
+    ui.draft[`note:${id}`] = el.value;
+    noteSaver(id)(el.value);
+  } else if (el.dataset && el.dataset.noteQ !== undefined) {
+    ui.noteQuery = el.value;
+    render();
   }
 });
 
 document.addEventListener('blur', (e) => {
   const el = e.target;
-  if (el.dataset && el.dataset.memo) delete ui.draft[`memo:${el.dataset.memo}`];
+  if (!el.dataset) return;
+  if (el.dataset.memo) delete ui.draft[`memo:${el.dataset.memo}`];
+  if (el.dataset.note) delete ui.draft[`note:${el.dataset.note}`];
 }, true);
 
 document.addEventListener('change', async (e) => {
@@ -645,6 +747,8 @@ function snapshotFocus() {
   let sel = null;
   if (d.k) sel = `.form [data-k="${d.k}"]`;
   else if (d.memo) sel = `[data-memo="${CSS.escape(d.memo)}"]`;
+  else if (d.note) sel = `[data-note="${CSS.escape(d.note)}"]`;
+  else if (d.noteQ !== undefined) sel = '[data-note-q]';
   else if (d.set) sel = `[data-set="${d.set}"]`;
   if (!sel) return null;
   let s = null;
@@ -706,6 +810,8 @@ function render() {
     elView.innerHTML = renderToday(data, ui);
   } else if (ui.tab === 'links') {
     elView.innerHTML = renderLinks(data, ui);
+  } else if (ui.tab === 'notes') {
+    elView.innerHTML = renderNotes(data, ui);
   } else if (ui.tab === 'settings') {
     elView.innerHTML = renderSettings(data, ui, store);
   } else {
