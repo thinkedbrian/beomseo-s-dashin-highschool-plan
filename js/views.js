@@ -429,12 +429,20 @@ export function renderCalendar(data, ui) {
   const dim = new Date(y, m + 1, 0).getDate();
   const cells = Math.ceil((lead + dim) / 7) * 7;
 
+  // 일정과 할 일을 같은 날짜 칸에 모아서 보여 준다
   const byDate = {};
   Object.entries(data.events).forEach(([id, ev]) => {
     if (!ev || !ev.date) return;
-    (byDate[ev.date] = byDate[ev.date] || []).push({ id, ...ev });
+    (byDate[ev.date] = byDate[ev.date] || []).push({ kind: 'event', id, ...ev });
   });
-  Object.values(byDate).forEach((l) => l.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'ko')));
+  Object.entries(data.todos).forEach(([id, t]) => {
+    if (!t || !t.date) return;
+    (byDate[t.date] = byDate[t.date] || []).push({ kind: 'todo', id, ...t });
+  });
+  Object.values(byDate).forEach((l) => l.sort((a, b) => (
+    (a.kind === b.kind ? 0 : (a.kind === 'event' ? -1 : 1))
+    || String(a.title || '').localeCompare(String(b.title || ''), 'ko')
+  )));
 
   let grid = WD.map((w, i) => (
     `<div class="cal-wd${i === 0 ? ' sun' : ''}${i === 6 ? ' sat' : ''}">${w}</div>`
@@ -452,9 +460,10 @@ export function renderCalendar(data, ui) {
     const shown = list.slice(0, ui.chipLimit);
     const rest = list.length - shown.length;
 
-    const chips = shown.map((ev) => {
-      const t = typeOf(data, ev.type);
-      return `<span class="chip${ev.done ? ' is-done' : ''}" style="background:${t.color};color:${textOn(t.color)}">${esc(ev.title)}</span>`;
+    const chips = shown.map((it) => {
+      const t = typeOf(data, it.kind === 'todo' ? 'todo' : it.type);
+      const cls = `chip${it.done ? ' is-done' : ''}${it.kind === 'todo' ? ' is-task' : ''}`;
+      return `<span class="${cls}" style="background:${t.color};color:${textOn(t.color)}">${esc(it.title)}</span>`;
     }).join('');
 
     const cls = [
@@ -477,8 +486,11 @@ export function renderCalendar(data, ui) {
   )).join('');
 
   const sel = ui.selDate;
-  const selList = sortEvents(byDate[sel] || []);
+  const dayAll = byDate[sel] || [];
+  const dayEvents = sortEvents(dayAll.filter((x) => x.kind === 'event'));
+  const dayTodos = dayAll.filter((x) => x.kind === 'todo');
   const adding = ui.form && ui.form.type === 'event' && !ui.form.id;
+  const addingDayTodo = ui.form && ui.form.type === 'todo' && !ui.form.id && !ui.form.subject;
 
   return `<section class="panel">
     <div class="cal-head">
@@ -495,11 +507,18 @@ export function renderCalendar(data, ui) {
 
   <section class="panel">
     <div class="panel-head">
-      <h2 class="panel-title">${esc(midDate(sel))}<span class="count">${selList.length}개</span></h2>
-      ${adding ? '' : `<button type="button" class="btn primary" data-act="form-open" data-type="event" data-date="${esc(sel)}">+ 이 날짜에 일정 추가</button>`}
+      <h2 class="panel-title">${esc(midDate(sel))}<span class="count">일정 ${dayEvents.length} · 할 일 ${dayTodos.length}</span></h2>
+      <div class="btn-row">
+        ${adding ? '' : `<button type="button" class="btn primary" data-act="form-open" data-type="event" data-date="${esc(sel)}">+ 일정 추가</button>`}
+        ${addingDayTodo ? '' : `<button type="button" class="btn" data-act="form-open" data-type="todo" data-date="${esc(sel)}">+ 할 일 추가</button>`}
+      </div>
     </div>
     ${adding ? eventForm(data, ui, null, { date: ui.form.date }) : ''}
-    ${eventList(data, ui, selList, { showSubject: true, empty: '이 날은 일정이 없습니다.' })}
+    ${eventList(data, ui, dayEvents, { showSubject: true, empty: '이 날은 일정이 없습니다.' })}
+
+    ${(dayTodos.length || addingDayTodo) ? '<h3 class="subhead">할 일</h3>' : ''}
+    ${addingDayTodo ? todoForm(data, ui, null, { date: ui.form.date || sel }) : ''}
+    ${dayTodos.map((t) => todoItem(data, ui, t, { showSubject: true })).join('')}
   </section>`;
 }
 

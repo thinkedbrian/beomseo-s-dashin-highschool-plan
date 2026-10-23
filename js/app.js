@@ -211,6 +211,7 @@ async function saveForm() {
       };
       if (ui.form.id) await patch('todos', ui.form.id, obj);
       else await add('todos', obj, 'todo');
+      ui.selDate = obj.date;
     } else if (type === 'book') {
       const title = (f.title || '').trim();
       if (!title) return formFail('문제집 이름을 적어 주세요.', f);
