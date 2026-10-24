@@ -4,7 +4,7 @@ import {
   esc, safeUrl, todayKey, toKey, addDays, pad, dday, daysBetween,
   longDate, midDate, shortDate, byOrder, sortEvents,
   typeOf, rgba, lighten, textOn, pct, normHex,
-  bookStats, missingRanges, rangeLength, rangeText,
+  bookStats, missingRanges, rangeLength, rangeText, extractTags,
 } from './util.js';
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
@@ -815,75 +815,228 @@ function noteStamp(iso) {
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
-function noteRow(ui, n) {
-  const key = `note:${n.id}`;
-  if (ui.pendingDelete === key) return confirmRow(`"${noteTitle(n.body)}" 메모를 정말 삭제할까요?`, key);
-  return `<div class="note-item">
-    <button type="button" class="note-row" data-act="note-open" data-id="${esc(n.id)}">
-      <span class="note-title">${n.pinned ? '<span class="note-pin-mark" aria-label="고정됨">📌</span> ' : ''}${esc(noteTitle(n.body))}</span>
-      <span class="note-meta"><span class="note-when">${esc(noteStamp(n.updatedAt))}</span><span class="note-prev">${esc(notePreview(n.body))}</span></span>
-    </button>
-    <span class="item-acts">
-      <button type="button" class="btn icon" data-act="note-pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '고정 해제' : '위에 고정'}" title="${n.pinned ? '고정 해제' : '위에 고정'}">${n.pinned ? '📌' : '📍'}</button>
-      <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
-    </span>
-  </div>`;
+function liveNotes(data) {
+  return Object.entries(data.notes || {})
+    .map(([id, n]) => ({ id, ...n }))
+    .filter((n) => !n.deletedAt);
 }
 
-function noteEditor(ui, n) {
-  const key = `note:${n.id}`;
-  const state = ui.memoState[key] || '';
-  return `<section class="panel">
-    <div class="panel-head">
-      <button type="button" class="btn" data-act="note-back">‹ 메모 목록</button>
-      <span class="save-state ${state === '저장됨' ? 'ok' : (state && state !== '저장 중…' ? 'err' : '')}">${esc(state)}</span>
-      <span class="item-acts">
-        <button type="button" class="btn icon" data-act="note-pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '고정 해제' : '위에 고정'}" title="${n.pinned ? '고정 해제' : '위에 고정'}">${n.pinned ? '📌' : '📍'}</button>
-        <button type="button" class="btn icon danger" data-act="del-ask" data-key="${esc(key)}" aria-label="삭제" title="삭제">🗑</button>
-      </span>
-    </div>
-    ${ui.pendingDelete === key ? confirmRow('이 메모를 정말 삭제할까요?', key) : ''}
-    <p class="note-stamp">${esc(noteStamp(n.updatedAt))}</p>
-    <textarea class="note-editor" data-note="${esc(n.id)}" placeholder="첫 줄이 제목이 됩니다">${esc(val(ui, `note:${n.id}`, n.body || ''))}</textarea>
-    <p class="muted" style="margin:6px 0 0">입력을 멈추면 자동으로 저장됩니다. 비워 두고 나가면 메모가 사라집니다.</p>
-  </section>`;
+function trashNotes(data) {
+  return Object.entries(data.notes || {})
+    .map(([id, n]) => ({ id, ...n }))
+    .filter((n) => n.deletedAt);
 }
 
-export function renderNotes(data, ui) {
-  const all = Object.entries(data.notes || {}).map(([id, n]) => ({ id, ...n }));
+function folderNameOf(data, id) {
+  const f = (data.folders || {})[id];
+  return f ? f.name : '';
+}
 
-  const open = ui.noteId && all.find((n) => n.id === ui.noteId);
-  if (open) return noteEditor(ui, open);
+function allTags(data) {
+  const counts = new Map();
+  liveNotes(data).forEach((n) => {
+    extractTags(n.body).forEach((t) => counts.set(t, (counts.get(t) || 0) + 1));
+  });
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'));
+}
 
+function currentFilter(ui) {
+  return ui.noteFilter && ui.noteFilter.kind ? ui.noteFilter : { kind: 'all', value: '' };
+}
+
+function filteredNotes(data, ui) {
+  const f = currentFilter(ui);
+  let list = f.kind === 'trash' ? trashNotes(data) : liveNotes(data);
+  if (f.kind === 'folder') list = list.filter((n) => (n.folder || '') === f.value);
+  if (f.kind === 'tag') list = list.filter((n) => extractTags(n.body).includes(f.value));
   const q = (ui.noteQuery || '').trim().toLowerCase();
-  const matched = q
-    ? all.filter((n) => String(n.body || '').toLowerCase().includes(q))
-    : all;
-  const sorted = matched.sort((a, b) => (
+  if (q) list = list.filter((n) => String(n.body || '').toLowerCase().includes(q));
+  return list.sort((a, b) => (
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
     || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
   ));
+}
 
-  const pinned = sorted.filter((n) => n.pinned);
-  const rest = sorted.filter((n) => !n.pinned);
+function filterTitle(data, ui) {
+  const f = currentFilter(ui);
+  if (f.kind === 'trash') return '최근 삭제된 항목';
+  if (f.kind === 'tag') return `#${f.value}`;
+  if (f.kind === 'folder') return folderNameOf(data, f.value) || '폴더 없음';
+  return '모든 메모';
+}
+
+/* --- 왼쪽: 폴더 · 태그 --- */
+
+function noteRail(data, ui) {
+  const f = currentFilter(ui);
+  const live = liveNotes(data);
+  const folders = byOrder(data.folders);
+  const noFolder = live.filter((n) => !n.folder).length;
+  const trash = trashNotes(data).length;
+  const tags = allTags(data);
+
+  const row = (kind, value, icon, name, n, extra) => {
+    const on = f.kind === kind && (kind !== 'folder' || f.value === value);
+    return `<div class="rail-item">
+      <button type="button" class="rail-row${on ? ' is-on' : ''}" data-act="note-filter" data-kind="${kind}" data-value="${esc(value)}">
+        <span class="rail-ico">${icon}</span>
+        <span class="rail-name">${esc(name)}</span>
+        <span class="rail-n">${n}</span>
+      </button>
+      ${extra || ''}
+    </div>`;
+  };
+
+  const folderRows = folders.map((fo) => row('folder', fo.id, '📁', fo.name,
+    live.filter((n) => n.folder === fo.id).length,
+    `<button type="button" class="btn icon" data-act="form-open" data-type="folder" data-id="${esc(fo.id)}" aria-label="폴더 수정" title="폴더 수정">✏️</button>`)).join('');
+
+  return `<aside class="notes-rail">
+    <h3 class="rail-head">폴더</h3>
+    ${row('all', '', '🗒️', '모든 메모', live.length)}
+    ${folderRows}
+    ${noFolder && folders.length ? row('folder', '', '📁', '폴더 없음', noFolder) : ''}
+    <button type="button" class="rail-add" data-act="form-open" data-type="folder">＋ 폴더 추가</button>
+    ${row('trash', '', '🗑', '최근 삭제된 항목', trash)}
+
+    <h3 class="rail-head">태그</h3>
+    ${tags.length
+    ? `<div class="tag-chips">${tags.map(([t, n]) => `
+        <button type="button" class="tag-chip${f.kind === 'tag' && f.value === t ? ' is-on' : ''}" data-act="note-filter" data-kind="tag" data-value="${esc(t)}">#${esc(t)} <span class="rail-n">${n}</span></button>`).join('')}</div>`
+    : '<p class="muted tiny">메모 안에 <code>#숙제</code> 처럼 쓰면 태그가 생깁니다.</p>'}
+  </aside>`;
+}
+
+/* --- 가운데: 목록 --- */
+
+function noteRow(data, ui, n) {
+  const f = currentFilter(ui);
+  const tags = extractTags(n.body).slice(0, 3);
+  const fname = folderNameOf(data, n.folder);
+  return `<div class="note-item${ui.noteId === n.id ? ' is-sel' : ''}">
+    <button type="button" class="note-row" data-act="note-open" data-id="${esc(n.id)}">
+      <span class="note-title">${n.pinned ? '<span class="note-pin-mark" aria-label="고정됨">📌</span> ' : ''}${esc(noteTitle(n.body))}</span>
+      <span class="note-meta">
+        <span class="note-when">${esc(noteStamp(n.deletedAt || n.updatedAt))}</span>
+        <span class="note-prev">${esc(notePreview(n.body))}</span>
+      </span>
+      <span class="note-tagline">
+        ${f.kind === 'trash' ? '<span class="note-folder">🗑 삭제됨</span>' : `<span class="note-folder">📁 ${esc(fname || '메모')}</span>`}
+        ${tags.map((t) => `<span class="note-tag">#${esc(t)}</span>`).join('')}
+      </span>
+    </button>
+  </div>`;
+}
+
+function noteListPane(data, ui) {
+  const f = currentFilter(ui);
+  const list = filteredNotes(data, ui);
+  const editingFolder = ui.form && ui.form.type === 'folder';
 
   let body;
-  if (!all.length) {
-    body = '<p class="empty">아직 메모가 없습니다. 오른쪽 위 버튼으로 하나 만들어 보세요.</p>';
-  } else if (!sorted.length) {
-    body = `<p class="empty">"${esc(ui.noteQuery)}" 와(과) 맞는 메모가 없습니다.</p>`;
+  if (editingFolder) body = '';
+  if (!list.length) {
+    const q = (ui.noteQuery || '').trim();
+    if (q) body = `<p class="empty">"${esc(q)}" 와(과) 맞는 메모가 없습니다.</p>`;
+    else if (f.kind === 'trash') body = '<p class="empty">삭제된 메모가 없습니다.</p>';
+    else body = '<p class="empty">메모가 없습니다. ✏️ 로 하나 만들어 보세요.</p>';
   } else {
-    body = (pinned.length ? `<h3 class="subhead">고정됨</h3>${pinned.map((n) => noteRow(ui, n)).join('')}` : '')
-      + (rest.length ? `${pinned.length ? '<h3 class="subhead">메모</h3>' : ''}${rest.map((n) => noteRow(ui, n)).join('')}` : '');
+    body = list.map((n) => noteRow(data, ui, n)).join('');
   }
 
-  return `<section class="panel">
-    <div class="panel-head">
-      <h2 class="panel-title">메모<span class="count">${all.length}개</span></h2>
-      <button type="button" class="btn primary" data-act="note-new">✏️ 새 메모</button>
+  return `<div class="notes-list">
+    <div class="notes-list-head">
+      <h3 class="notes-list-title">${esc(filterTitle(data, ui))}</h3>
+      <div class="btn-row">
+        ${f.kind === 'trash'
+    ? (trashNotes(data).length ? '<button type="button" class="btn tiny danger" data-act="del-ask" data-key="trash-empty">비우기</button>' : '')
+    : '<button type="button" class="btn primary tiny" data-act="note-new">✏️ 새 메모</button>'}
+      </div>
     </div>
-    ${all.length ? `<input type="search" class="note-search" data-note-q value="${esc(ui.noteQuery || '')}" placeholder="메모 검색" aria-label="메모 검색">` : ''}
+    <input type="search" class="note-search" data-note-q value="${esc(ui.noteQuery || '')}" placeholder="검색" aria-label="메모 검색">
+    ${ui.pendingDelete === 'trash-empty' ? confirmRow('삭제된 메모를 모두 완전히 지울까요? 되돌릴 수 없습니다.', 'trash-empty', '비우기') : ''}
+    ${String(ui.pendingDelete || '').startsWith('folder:')
+    ? confirmRow(`"${folderNameOf(data, String(ui.pendingDelete).slice(7))}" 폴더를 삭제할까요? 안에 있던 메모는 지워지지 않고 폴더에서만 빠집니다.`, ui.pendingDelete)
+    : ''}
+    ${editingFolder ? folderForm(data, ui) : ''}
     ${body}
+    <p class="notes-count">${list.length}개의 메모</p>
+  </div>`;
+}
+
+function folderForm(data, ui) {
+  const fo = ui.form.id ? (data.folders || {})[ui.form.id] : null;
+  const key = `folder:${ui.form.id}`;
+  return `<div class="form">
+    ${errLine(ui)}
+    <div class="f-row">
+      <label>폴더 이름<input type="text" data-k="name" value="${esc(val(ui, 'name', fo ? fo.name : ''))}" placeholder="예: 수행평가"></label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="form-save">저장</button>
+      <button type="button" class="btn" data-act="form-cancel">취소</button>
+      ${fo ? `<button type="button" class="btn danger" data-act="del-ask" data-key="${esc(key)}">폴더 삭제</button>` : ''}
+    </div>
+  </div>`;
+}
+
+/* --- 오른쪽: 본문 --- */
+
+function noteEditorPane(data, ui) {
+  const all = Object.entries(data.notes || {}).map(([id, n]) => ({ id, ...n }));
+  const n = ui.noteId && all.find((x) => x.id === ui.noteId);
+  if (!n) {
+    return `<div class="notes-editor">
+      <p class="empty note-blank">메모를 고르거나 ✏️ 로 새로 만드세요.</p>
+    </div>`;
+  }
+
+  const key = `note:${n.id}`;
+  const state = ui.memoState[key] || '';
+  const folders = byOrder(data.folders);
+
+  if (n.deletedAt) {
+    return `<div class="notes-editor">
+      <div class="notes-editor-head">
+        <button type="button" class="btn tiny only-narrow" data-act="note-back">‹ 목록</button>
+        <span class="muted tiny">${esc(noteStamp(n.deletedAt))} 삭제됨</span>
+        <span class="btn-row">
+          <button type="button" class="btn tiny" data-act="note-restore" data-id="${esc(n.id)}">복원</button>
+          <button type="button" class="btn tiny danger" data-act="del-ask" data-key="${esc(key)}">완전 삭제</button>
+        </span>
+      </div>
+      ${ui.pendingDelete === key ? confirmRow('이 메모를 완전히 지울까요? 되돌릴 수 없습니다.', key) : ''}
+      <textarea class="note-editor" readonly>${esc(n.body || '')}</textarea>
+      <p class="muted tiny" style="margin:6px 0 0">삭제된 메모는 고칠 수 없습니다. 복원하면 다시 쓸 수 있습니다.</p>
+    </div>`;
+  }
+
+  return `<div class="notes-editor">
+    <div class="notes-editor-head">
+      <button type="button" class="btn tiny only-narrow" data-act="note-back">‹ 목록</button>
+      <span class="save-state ${state === '저장됨' ? 'ok' : (state && state !== '저장 중…' ? 'err' : '')}">${esc(state)}</span>
+      <span class="btn-row">
+        <select class="note-folder-sel" data-note-folder="${esc(n.id)}" aria-label="폴더 옮기기">
+          <option value=""${!n.folder ? ' selected' : ''}>📁 폴더 없음</option>
+          ${folders.map((fo) => `<option value="${esc(fo.id)}"${n.folder === fo.id ? ' selected' : ''}>📁 ${esc(fo.name)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn icon" data-act="note-pin" data-id="${esc(n.id)}" aria-label="${n.pinned ? '고정 해제' : '위에 고정'}" title="${n.pinned ? '고정 해제' : '위에 고정'}">${n.pinned ? '📌' : '📍'}</button>
+        <button type="button" class="btn icon danger" data-act="note-trash" data-id="${esc(n.id)}" aria-label="삭제" title="삭제">🗑</button>
+      </span>
+    </div>
+    <p class="note-stamp">${esc(noteStamp(n.updatedAt))}</p>
+    <textarea class="note-editor" data-note="${esc(n.id)}" placeholder="첫 줄이 제목이 됩니다. #태그 도 쓸 수 있습니다.">${esc(val(ui, `note:${n.id}`, n.body || ''))}</textarea>
+    <p class="muted tiny" style="margin:6px 0 0">입력을 멈추면 자동 저장됩니다. 비워 두고 나가면 메모가 사라집니다.</p>
+  </div>`;
+}
+
+export function renderNotes(data, ui) {
+  return `<section class="panel notes-panel">
+    <div class="notes-grid${ui.noteId ? ' is-editing' : ''}">
+      ${noteRail(data, ui)}
+      ${noteListPane(data, ui)}
+      ${noteEditorPane(data, ui)}
+    </div>
   </section>`;
 }
 

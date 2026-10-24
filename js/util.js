@@ -210,6 +210,19 @@ export function missingRanges(b) {
   return out;
 }
 
+// 메모 본문에서 #태그 를 뽑아낸다 (iOS 메모장과 같게 본문 아무 데나 써도 인식)
+export function extractTags(body) {
+  const out = [];
+  const re = /#([^\s#]+)/g;
+  let m = re.exec(String(body || ''));
+  while (m) {
+    const tag = m[1].replace(/[.,!?;:)\]}'"]+$/, '');
+    if (tag && !out.includes(tag)) out.push(tag);
+    m = re.exec(String(body || ''));
+  }
+  return out;
+}
+
 export function rangeText(r, unit) {
   const u = unit || '쪽';
   return `${r.from}~${r.to}${u}`;

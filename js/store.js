@@ -10,7 +10,7 @@ import { newId, DEFAULT_TYPES } from './util.js';
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 const LS_KEY = 'pjs-planner-v1';
 
-export const COLLS = ['events', 'todos', 'subjects', 'links', 'settings', 'types', 'books', 'notes'];
+export const COLLS = ['events', 'todos', 'subjects', 'links', 'settings', 'types', 'books', 'notes', 'folders'];
 
 const listeners = new Set();
 let fb = null;      // { auth, db, A, F }

@@ -53,6 +53,7 @@ const ui = {
   memoState: {},
   noteId: null,
   noteQuery: '',
+  noteFilter: { kind: 'all', value: '' },
 };
 
 /* ===================== 토스트 ===================== */
@@ -315,6 +316,11 @@ async function saveForm() {
       const color = normHex(f.color, '#2f5bd7');
       if (ui.form.id) await patch('types', ui.form.id, { label, color });
       else await put('types', newId('type'), { order: nextOrder('types'), label, color });
+    } else if (type === 'folder') {
+      const name = (f.name || '').trim();
+      if (!name) return formFail('폴더 이름을 적어 주세요.', f);
+      if (ui.form.id) await patch('folders', ui.form.id, { name });
+      else await put('folders', newId('folder'), { order: nextOrder('folders'), name });
     } else if (type === 'link') {
       const title = (f.title || '').trim();
       const url = (f.url || '').trim();
@@ -350,6 +356,24 @@ async function runDelete(key) {
     else if (kind === 'note') {
       await remove('notes', parts[1]);
       if (ui.noteId === parts[1]) ui.noteId = null;
+    } else if (kind === 'folder') {
+      // 폴더만 없애고 안에 있던 메모는 남긴다
+      const inside = Object.entries(store.data.notes)
+        .filter(([, n]) => n.folder === parts[1])
+        .map(([nid, n]) => ['notes', nid, { ...n, folder: '' }]);
+      if (inside.length) await putMany(inside);
+      await remove('folders', parts[1]);
+      closeForm();
+      if (ui.noteFilter && ui.noteFilter.kind === 'folder' && ui.noteFilter.value === parts[1]) {
+        ui.noteFilter = { kind: 'all', value: '' };
+      }
+    } else if (kind === 'trash-empty') {
+      const ids = Object.entries(store.data.notes)
+        .filter(([, n]) => n.deletedAt)
+        .map(([nid]) => nid);
+      for (const nid of ids) await remove('notes', nid);
+      ui.noteId = null;
+      toast(`${ids.length}개를 완전히 지웠습니다.`);
     }
     else if (kind === 'book') {
       // 이 문제집에 걸린 계획 일정도 같이 치운다
@@ -553,8 +577,13 @@ async function newNote() {
   if (!canEdit()) { toast('로그인한 뒤에 쓸 수 있습니다.', true); return; }
   const now = new Date().toISOString();
   const id = newId('note');
+  // 폴더를 보고 있었다면 그 폴더 안에 만든다
+  const f = ui.noteFilter || {};
+  const folder = f.kind === 'folder' ? (f.value || '') : '';
   try {
-    await put('notes', id, { body: '', createdAt: now, updatedAt: now, pinned: false });
+    await put('notes', id, {
+      body: '', createdAt: now, updatedAt: now, pinned: false, folder, deletedAt: '',
+    });
     ui.noteId = id;
     ui.pendingDelete = null;
     ui.noteQuery = '';
@@ -586,6 +615,46 @@ async function toggleNotePin(id) {
   } catch (e) {
     toast(`저장 실패: ${errMsg(e)}`, true);
   }
+}
+
+// 삭제는 바로 지우지 않고 "최근 삭제된 항목"으로 옮긴다
+async function trashNote(id) {
+  const n = one('notes', id);
+  if (!n) return;
+  try {
+    await patch('notes', id, { deletedAt: new Date().toISOString(), pinned: false });
+    if (ui.noteId === id) ui.noteId = null;
+    render();
+    toast('최근 삭제된 항목으로 옮겼습니다.');
+  } catch (e) {
+    toast(`삭제 실패: ${errMsg(e)}`, true);
+  }
+}
+
+async function restoreNote(id) {
+  try {
+    await patch('notes', id, { deletedAt: '', updatedAt: new Date().toISOString() });
+    toast('복원했습니다.');
+  } catch (e) {
+    toast(`복원 실패: ${errMsg(e)}`, true);
+  }
+}
+
+async function setNoteFolder(id, folder) {
+  try {
+    await patch('notes', id, { folder: folder || '' });
+    toast('옮겼습니다.');
+  } catch (e) {
+    toast(`저장 실패: ${errMsg(e)}`, true);
+  }
+}
+
+function setNoteFilter(kind, value) {
+  ui.noteFilter = { kind, value: value || '' };
+  ui.noteId = null;
+  ui.pendingDelete = null;
+  closeForm();
+  render();
 }
 
 /* ===================== 과목 메모 자동 저장 ===================== */
@@ -647,6 +716,9 @@ const handlers = {
   'note-open': (el) => { openNote(el.dataset.id); },
   'note-back': () => { closeNote().then(render); },
   'note-pin': (el) => { toggleNotePin(el.dataset.id); },
+  'note-trash': (el) => { trashNote(el.dataset.id); },
+  'note-restore': (el) => { restoreNote(el.dataset.id); },
+  'note-filter': (el) => { setNoteFilter(el.dataset.kind, el.dataset.value); },
   export: () => doExport(),
   import: () => elImport.click(),
   login: async () => {
@@ -708,6 +780,12 @@ document.addEventListener('change', async (e) => {
   if (el.dataset.k === 'type') {
     ui.draft.type = el.value;
     render();
+    return;
+  }
+
+  // 메모를 다른 폴더로 옮기기
+  if (el.dataset.noteFolder) {
+    setNoteFolder(el.dataset.noteFolder, el.value);
     return;
   }
 
