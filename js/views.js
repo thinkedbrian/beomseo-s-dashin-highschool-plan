@@ -946,6 +946,8 @@ function noteListPane(data, ui) {
 
   return `<div class="notes-list">
     <div class="notes-list-head">
+      <button type="button" class="btn icon pane-toggle" data-act="notes-toggle-rail"
+        aria-label="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}" title="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}">☰</button>
       <h3 class="notes-list-title">${esc(filterTitle(data, ui))}</h3>
       <div class="btn-row">
         ${f.kind === 'trash'
@@ -987,6 +989,11 @@ function noteEditorPane(data, ui) {
   const n = ui.noteId && all.find((x) => x.id === ui.noteId);
   if (!n) {
     return `<div class="notes-editor">
+      ${ui.listHidden ? `<div class="notes-editor-head">
+        <button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-rail"
+          aria-label="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}" title="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}">☰</button>
+        <button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-list" aria-label="목록 보이기" title="목록 보이기">▤</button>
+      </div>` : ''}
       <p class="empty note-blank">메모를 고르거나 ✏️ 로 새로 만드세요.</p>
     </div>`;
   }
@@ -999,6 +1006,10 @@ function noteEditorPane(data, ui) {
     return `<div class="notes-editor">
       <div class="notes-editor-head">
         <button type="button" class="btn tiny only-narrow" data-act="note-back">‹ 목록</button>
+        ${ui.listHidden ? `<button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-rail"
+          aria-label="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}" title="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}">☰</button>` : ''}
+        <button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-list"
+          aria-label="${ui.listHidden ? '목록 보이기' : '목록 숨기기'}" title="${ui.listHidden ? '목록 보이기' : '목록 숨기기'}">▤</button>
         <span class="muted tiny">${esc(noteStamp(n.deletedAt))} 삭제됨</span>
         <span class="btn-row">
           <button type="button" class="btn tiny" data-act="note-restore" data-id="${esc(n.id)}">복원</button>
@@ -1014,6 +1025,10 @@ function noteEditorPane(data, ui) {
   return `<div class="notes-editor">
     <div class="notes-editor-head">
       <button type="button" class="btn tiny only-narrow" data-act="note-back">‹ 목록</button>
+      ${ui.listHidden ? `<button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-rail"
+        aria-label="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}" title="${ui.railHidden ? '폴더 보이기' : '폴더 숨기기'}">☰</button>` : ''}
+      <button type="button" class="btn icon pane-toggle only-wide" data-act="notes-toggle-list"
+        aria-label="${ui.listHidden ? '목록 보이기' : '목록 숨기기'}" title="${ui.listHidden ? '목록 보이기' : '목록 숨기기'}">▤</button>
       <span class="save-state ${state === '저장됨' ? 'ok' : (state && state !== '저장 중…' ? 'err' : '')}">${esc(state)}</span>
       <span class="btn-row">
         <select class="note-folder-sel" data-note-folder="${esc(n.id)}" aria-label="폴더 옮기기">
@@ -1031,8 +1046,14 @@ function noteEditorPane(data, ui) {
 }
 
 export function renderNotes(data, ui) {
+  const cls = [
+    'notes-grid',
+    ui.noteId ? 'is-editing' : '',
+    ui.railHidden ? 'hide-rail' : '',
+    ui.listHidden ? 'hide-list' : '',
+  ].filter(Boolean).join(' ');
   return `<section class="panel notes-panel">
-    <div class="notes-grid${ui.noteId ? ' is-editing' : ''}">
+    <div class="${cls}">
       ${noteRail(data, ui)}
       ${noteListPane(data, ui)}
       ${noteEditorPane(data, ui)}

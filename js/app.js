@@ -54,7 +54,28 @@ const ui = {
   noteId: null,
   noteQuery: '',
   noteFilter: { kind: 'all', value: '' },
+  railHidden: false,
+  listHidden: false,
 };
+
+// 폴더/목록 칸을 접어 둔 상태는 기기마다 다른 취향이라 이 브라우저에만 기억한다
+const NOTE_VIEW_KEY = 'pjs-notes-view';
+
+(function loadNoteView() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NOTE_VIEW_KEY) || '{}');
+    ui.railHidden = Boolean(saved.railHidden);
+    ui.listHidden = Boolean(saved.listHidden);
+  } catch (e) { /* 없으면 기본값 */ }
+}());
+
+function saveNoteView() {
+  try {
+    localStorage.setItem(NOTE_VIEW_KEY, JSON.stringify({
+      railHidden: ui.railHidden, listHidden: ui.listHidden,
+    }));
+  } catch (e) { /* 저장 못 해도 화면은 그대로 */ }
+}
 
 /* ===================== 토스트 ===================== */
 
@@ -719,6 +740,8 @@ const handlers = {
   'note-trash': (el) => { trashNote(el.dataset.id); },
   'note-restore': (el) => { restoreNote(el.dataset.id); },
   'note-filter': (el) => { setNoteFilter(el.dataset.kind, el.dataset.value); },
+  'notes-toggle-rail': () => { ui.railHidden = !ui.railHidden; saveNoteView(); render(); },
+  'notes-toggle-list': () => { ui.listHidden = !ui.listHidden; saveNoteView(); render(); },
   export: () => doExport(),
   import: () => elImport.click(),
   login: async () => {

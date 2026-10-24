@@ -890,6 +890,26 @@ a { color: var(--accent); }
   .notes-grid.is-editing .notes-list { display: block; }
 }
 
+/* --- 폴더/목록 칸 접기 --- */
+
+.pane-toggle { flex: 0 0 auto; }
+.notes-list-title { flex: 1 1 auto; }
+.only-wide { display: none; }
+
+@media (min-width: 820px) {
+  .only-wide { display: inline-flex; }
+}
+
+/* 앞의 규칙들보다 뒤에 와야 접기가 이깁니다 */
+.notes-grid.hide-rail .notes-rail { display: none; }
+
+@media (min-width: 820px) {
+  .notes-grid.hide-list .notes-list { display: none; }
+  .notes-grid.hide-rail { grid-template-columns: 235px minmax(0, 1fr); }
+  .notes-grid.hide-list { grid-template-columns: 165px minmax(0, 1fr); }
+  .notes-grid.hide-rail.hide-list { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ===== 설정 / 과목 관리 ===== */
 
 .rowline {
