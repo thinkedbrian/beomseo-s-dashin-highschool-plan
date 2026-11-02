@@ -1,9 +1,10 @@
 // 앱 본체 — 상태, 라우팅, 이벤트 처리
 
 import {
-  todayKey, parseKey, longDate, isKey, debounce, byOrder, newId, esc,
+  todayKey, parseKey, longDate, shortDate, isKey, debounce, byOrder, newId, esc,
   normHex, bookStats, rangeText,
 } from './util.js';
+import { initCalendarDrag } from './drag.js';
 import {
   store, subscribe, init, one, put, patch, add, remove, putMany,
   exportObject, importObject, resetToSeed, signIn, signOutNow, canEdit,
@@ -832,6 +833,28 @@ document.addEventListener('keydown', (e) => {
   if (el.tagName === 'TEXTAREA') return;
   e.preventDefault();
   saveForm();
+});
+
+/* ===================== 달력에서 끌어서 날짜 옮기기 ===================== */
+
+async function moveToDate(kind, id, from, to) {
+  const coll = kind === 'todo' ? 'todos' : 'events';
+  const cur = one(coll, id);
+  if (!cur || cur.date === to) return;
+  const title = cur.title || (kind === 'todo' ? '할 일' : '일정');
+  try {
+    await patch(coll, id, { date: to });
+    ui.selDate = to;
+    render();
+    toast(`${title} → ${shortDate(to)}`);
+  } catch (e) {
+    toast(`옮기지 못했습니다: ${errMsg(e)}`, true);
+  }
+}
+
+initCalendarDrag({
+  isEnabled: () => ui.tab === 'calendar' && canEdit(),
+  onDrop: ({ kind, id, from, to }) => { moveToDate(kind, id, from, to); },
 });
 
 // 달력 칸에 보여 줄 일정 개수 (컴퓨터 3개, 폰 2개)

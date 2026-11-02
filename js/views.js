@@ -463,7 +463,9 @@ export function renderCalendar(data, ui) {
     const chips = shown.map((it) => {
       const t = typeOf(data, it.kind === 'todo' ? 'todo' : it.type);
       const cls = `chip${it.done ? ' is-done' : ''}${it.kind === 'todo' ? ' is-task' : ''}`;
-      return `<span class="${cls}" style="background:${t.color};color:${textOn(t.color)}">${esc(it.title)}</span>`;
+      return `<span class="${cls}" style="background:${t.color};color:${textOn(t.color)}"
+        data-drag-id="${esc(it.id)}" data-drag-kind="${it.kind}" data-drag-from="${key}"
+        title="${esc(it.title)} — 끌어서 다른 날짜로 옮길 수 있습니다">${esc(it.title)}</span>`;
     }).join('');
 
     const cls = [
